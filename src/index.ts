@@ -82,6 +82,127 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)));
 }
 
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+      continue;
+    }
+
+    if (char === ",") {
+      row.push(current);
+      current = "";
+      continue;
+    }
+
+    if (char === "\n") {
+      row.push(current);
+      if (row.some((cell) => cell.trim() !== "")) rows.push(row);
+      row = [];
+      current = "";
+      continue;
+    }
+
+    if (char === "\r") continue;
+
+    current += char;
+  }
+
+  if (current.length > 0 || row.length > 0) {
+    row.push(current);
+    if (row.some((cell) => cell.trim() !== "")) rows.push(row);
+  }
+
+  return rows;
+}
+
+function normalizeHeader(header: string): string {
+  return header
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .toLowerCase();
+}
+
+function getHeaderIndex(headers: string[], names: string[]): number {
+  for (const name of names) {
+    const index = headers.indexOf(name);
+    if (index !== -1) return index;
+  }
+  return -1;
+}
+
+function parseReadwiseTags(raw: string): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  let tags: string[] = [];
+
+  if (trimmed.startsWith("[")) {
+    const matches = trimmed.match(/'([^']+)'/g);
+    if (matches && matches.length > 0) {
+      tags = matches.map((value) => value.slice(1, -1));
+    } else {
+      const inner = trimmed.replace(/^\[|\]$/g, "");
+      tags = inner.split(",").map((tag) => tag.trim());
+    }
+  } else {
+    tags = trimmed.split(",").map((tag) => tag.trim());
+  }
+
+  const cleaned = tags
+    .map((tag) =>
+      tag
+        .replace(/^['"]|['"]$/g, "")
+        .trim()
+        .toLowerCase(),
+    )
+    .filter(Boolean);
+
+  return [...new Set(cleaned)];
+}
+
+function normalizeReadwiseDate(raw: string): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const iso = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.toISOString().replace("T", " ").replace("Z", "");
+}
+
+function fallbackTitle(url: string): string {
+  try {
+    return new URL(url).hostname.replace("www.", "");
+  } catch {
+    return url;
+  }
+}
+
 app.get("/api/fetch-meta", async (c) => {
   const url = c.req.query("url");
   if (!url) return c.json({ error: "URL is required" }, 400);
@@ -205,6 +326,135 @@ app.get("/api/proxy", async (c) => {
       500,
     );
   }
+});
+
+app.post("/api/import/readwise", async (c) => {
+  const contentType = c.req.header("content-type") || "";
+  let csv = "";
+
+  if (contentType.includes("multipart/form-data")) {
+    const form = await c.req.formData();
+    const file = form.get("file");
+    if (file && typeof file !== "string") {
+      csv = await file.text();
+    }
+  } else if (
+    contentType.includes("text/csv") ||
+    contentType.includes("text/plain")
+  ) {
+    csv = await c.req.text();
+  } else {
+    const body = await c.req.json().catch(() => null);
+    if (body?.csv) csv = body.csv;
+  }
+
+  if (!csv || !csv.trim()) {
+    return c.json({ error: "CSV file is required" }, 400);
+  }
+
+  const rows = parseCsv(csv);
+  if (rows.length === 0) {
+    return c.json({ error: "CSV is empty" }, 400);
+  }
+
+  const headerRow = rows.shift() || [];
+  const headers = headerRow.map(normalizeHeader);
+
+  const urlIndex = getHeaderIndex(headers, ["url"]);
+  if (urlIndex === -1) {
+    return c.json({ error: "CSV missing URL column" }, 400);
+  }
+
+  const titleIndex = getHeaderIndex(headers, ["title"]);
+  const tagsIndex = getHeaderIndex(headers, [
+    "document tags",
+    "document_tags",
+    "documenttags",
+    "tags",
+  ]);
+  const savedIndex = getHeaderIndex(headers, [
+    "saved date",
+    "saved_date",
+    "saved at",
+    "saved_at",
+    "saved",
+  ]);
+
+  let imported = 0;
+  let duplicate = 0;
+  let skipped = 0;
+  let errors = 0;
+
+  const seen = new Set<string>();
+  const insertItem = db.query(
+    "INSERT INTO items (url, title, type, created_at) VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))",
+  );
+  const existingItem = db.query("SELECT id FROM items WHERE url = ?");
+  const insertTag = db.query("INSERT OR IGNORE INTO tags (name) VALUES (?)");
+  const getTag = db.query("SELECT id FROM tags WHERE name = ?");
+  const insertItemTag = db.query(
+    "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
+  );
+
+  const importTx = db.transaction((dataRows: string[][]) => {
+    for (const row of dataRows) {
+      try {
+        const url = row[urlIndex]?.trim();
+        if (!url) {
+          skipped++;
+          continue;
+        }
+
+        if (seen.has(url)) {
+          duplicate++;
+          continue;
+        }
+
+        const existing = existingItem.get(url) as { id: number } | undefined;
+        if (existing?.id) {
+          duplicate++;
+          continue;
+        }
+
+        seen.add(url);
+
+        const title =
+          (titleIndex !== -1 ? row[titleIndex] : "")?.trim() ||
+          fallbackTitle(url);
+        const tagsRaw = tagsIndex !== -1 ? row[tagsIndex] : "";
+        const tags = parseReadwiseTags(tagsRaw);
+        const savedRaw = savedIndex !== -1 ? row[savedIndex] : "";
+        const createdAt = normalizeReadwiseDate(savedRaw);
+        const type = detectType(url);
+
+        const result = insertItem.run(
+          url,
+          title || "",
+          type || "article",
+          createdAt,
+        );
+        const itemId = result.lastInsertRowid;
+
+        if (tags.length > 0) {
+          for (const tagName of tags) {
+            insertTag.run(tagName);
+            const tag = getTag.get(tagName) as { id: number } | undefined;
+            if (tag?.id) {
+              insertItemTag.run(itemId, tag.id);
+            }
+          }
+        }
+
+        imported++;
+      } catch {
+        errors++;
+      }
+    }
+  });
+
+  importTx(rows);
+
+  return c.json({ success: true, imported, duplicate, skipped, errors });
 });
 
 app.get("/api/items", (c) => {

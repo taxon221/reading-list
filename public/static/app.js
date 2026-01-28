@@ -75,6 +75,48 @@ const viewTabs = document.querySelectorAll(".view-tab");
 const readingListView = document.getElementById("reading-list-view");
 const notesView = document.getElementById("notes-view");
 const notesList = document.getElementById("notes-list");
+const importBtn = document.getElementById("import-btn");
+const importFile = document.getElementById("import-file");
+
+if (importBtn && importFile) {
+  importBtn.addEventListener("click", () => importFile.click());
+
+  importFile.addEventListener("change", async () => {
+    const file = importFile.files && importFile.files[0];
+    if (!file) return;
+
+    const originalText = importBtn.textContent;
+    importBtn.disabled = true;
+    importBtn.textContent = "Importing...";
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/import/readwise", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        alert(data.error || "Import failed.");
+        return;
+      }
+
+      alert(
+        `Imported ${data.imported} items. Duplicates: ${data.duplicate}. Skipped: ${data.skipped}. Errors: ${data.errors}.`,
+      );
+      loadItems();
+      loadTags();
+    } catch {
+      alert("Import failed. Please try again.");
+    } finally {
+      importBtn.disabled = false;
+      importBtn.textContent = originalText || "Import CSV";
+      importFile.value = "";
+    }
+  });
+}
 
 async function fetchMetadata(url) {
   if (!url || !isValidUrl(url)) return null;

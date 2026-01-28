@@ -9,13 +9,14 @@ A minimal, self-hosted reading list manager. Save articles, videos, PDFs, and po
 - Mark items as read/unread
 - Built-in reader with highlights and notes
 - Notes & highlights view
+- Import from Readwise CSV
 - Clean, minimal interface
 - SQLite database (no external dependencies)
 - Single binary deployment with Bun
 
 ## Requirements
 
-- [Bun](https://bun.sh) v1.0 or later
+- [Bun](https://bun.sh)
 
 ## Run Directly (Bun)
 
@@ -56,6 +57,7 @@ For Docker deployments, the data directory is mounted as a volume to persist dat
 | GET | `/api/tags` | Get all tags |
 | GET | `/api/fetch-meta` | Fetch metadata for a URL (`?url=`) |
 | GET | `/api/proxy` | Reader proxy for external content (`?url=`) |
+| POST | `/api/import/readwise` | Import Readwise CSV (`multipart/form-data` file field: `file`) |
 | GET | `/api/highlights` | Get all highlights |
 | GET | `/api/items/:id/highlights` | Get highlights for an item |
 | POST | `/api/items/:id/highlights` | Create highlight (selected_text, note) |
@@ -73,7 +75,7 @@ curl -X POST http://localhost:3000/api/items \
 ## Project Structure
 
 ```
-reading-list-app/
+./
 ├── src/
 │   ├── index.ts      # Server entry point
 │   └── db.ts         # Database setup
@@ -87,11 +89,8 @@ reading-list-app/
 │       ├── icon-180.png
 │       ├── icon-192.png
 │       └── icon-512.png
+├── LICENSE
 ├── package.json
 ├── Dockerfile
 └── README.md
 ```
-
-## License
-
-MIT

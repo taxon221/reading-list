@@ -66,6 +66,35 @@ header h1 {
     letter-spacing: -0.02em;
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.import-btn {
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 0.75rem;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.import-btn:hover {
+    background: var(--bg);
+}
+
+.import-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .theme-toggle {
     display: flex;
     align-items: center;
