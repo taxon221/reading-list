@@ -15,10 +15,18 @@ export function initDb() {
       url TEXT NOT NULL,
       title TEXT NOT NULL DEFAULT '',
       type TEXT NOT NULL DEFAULT 'article',
+      notes TEXT NOT NULL DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       is_read INTEGER DEFAULT 0
     )
   `);
+
+  // Add notes column if it doesn't exist (for existing databases)
+  try {
+    db.run(`ALTER TABLE items ADD COLUMN notes TEXT NOT NULL DEFAULT ''`);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
 
   db.run(`
     CREATE TABLE IF NOT EXISTS tags (
@@ -34,6 +42,17 @@ export function initDb() {
       PRIMARY KEY (item_id, tag_id),
       FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
       FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS highlights (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL,
+      selected_text TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
     )
   `);
 }

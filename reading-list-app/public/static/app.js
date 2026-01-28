@@ -4,6 +4,12 @@ let pendingTags = [];
 let editTags = [];
 let fetchedMeta = null;
 let isFetching = false;
+let currentDropdownItemId = null;
+let currentDropdownItemUrl = null;
+let currentReaderId = null;
+let readerIframe = null;
+let currentHighlights = [];
+let pendingSelectionText = "";
 
 const form = document.getElementById("add-item-form");
 const urlInput = document.getElementById("url");
@@ -40,6 +46,35 @@ const editTagInput = document.getElementById("edit-tag-input");
 const editTagsContainer = document.getElementById("edit-tags-input");
 const modalClose = document.getElementById("modal-close");
 const modalCancel = document.getElementById("modal-cancel");
+
+const readerModal = document.getElementById("reader-modal");
+const readerTitle = document.getElementById("reader-title");
+const readerContent = document.getElementById("reader-content");
+const readerClose = document.getElementById("reader-close");
+const readerOpenOriginal = document.getElementById("reader-open-original");
+const readerSidebar = document.getElementById("reader-sidebar");
+const readerToggleNotes = document.getElementById("reader-toggle-notes");
+const sidebarHighlights = document.getElementById("sidebar-highlights");
+const highlightsCount = document.getElementById("highlights-count");
+
+const itemDropdownMenu = document.getElementById("item-dropdown-menu");
+const dropdownEdit = document.getElementById("dropdown-edit");
+const dropdownOpenUrl = document.getElementById("dropdown-open-url");
+
+const selectionPopup = document.getElementById("selection-popup");
+const popupHighlightBtn = document.getElementById("popup-highlight-btn");
+
+const noteModal = document.getElementById("note-modal");
+const noteModalClose = document.getElementById("note-modal-close");
+const noteModalQuote = document.getElementById("note-modal-quote");
+const noteModalText = document.getElementById("note-modal-text");
+const noteModalCancel = document.getElementById("note-modal-cancel");
+const noteModalSave = document.getElementById("note-modal-save");
+
+const viewTabs = document.querySelectorAll(".view-tab");
+const readingListView = document.getElementById("reading-list-view");
+const notesView = document.getElementById("notes-view");
+const notesList = document.getElementById("notes-list");
 
 async function fetchMetadata(url) {
   if (!url || !isValidUrl(url)) return null;
@@ -206,11 +241,12 @@ function renderItems(items) {
           <span class="item-date">${formatDate(item.created_at)}</span>
         </div>
         <div class="item-col-right">
-          <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener" class="item-title">
+          <span class="item-title" onclick="openReader(${item.id}, '${escapeHtml(item.url).replace(/'/g, "\\'")}', '${escapeHtml(item.title || item.url).replace(/'/g, "\\'")}', '${item.type}')">
             ${escapeHtml(item.title || item.url)}
-          </a>
+          </span>
           <div class="item-meta">
             <span class="item-domain">${escapeHtml(getDomain(item.url))}</span>
+            ${item.highlight_count ? `<span class="item-has-highlights" title="${item.highlight_count} highlight${item.highlight_count > 1 ? "s" : ""}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg> ${item.highlight_count}</span>` : ""}
             ${item.tags?.length ? item.tags.map((t) => `<button class="item-tag" onclick="filterByTag('${escapeHtml(t)}')">#${escapeHtml(t)}</button>`).join("") : ""}
           </div>
         </div>
@@ -224,7 +260,7 @@ function renderItems(items) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>
           </button>
         </div>
-        <button class="btn-more" onclick="openEditModal(${item.id})" title="Edit">
+        <button class="btn-more" onclick="openItemMenu(event, ${item.id}, '${escapeHtml(item.url).replace(/'/g, "\\'")}')" title="More options">
           <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>
         </button>
       </div>
@@ -375,6 +411,632 @@ function filterByTag(tag) {
   }
 }
 
+// View Tabs
+viewTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    viewTabs.forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+
+    const view = tab.dataset.view;
+    if (view === "reading-list") {
+      readingListView.style.display = "";
+      notesView.style.display = "none";
+    } else if (view === "notes") {
+      readingListView.style.display = "none";
+      notesView.style.display = "";
+      loadAllHighlights();
+    }
+  });
+});
+
+// Item dropdown menu functions
+function openItemMenu(event, id, url) {
+  event.stopPropagation();
+  currentDropdownItemId = id;
+  currentDropdownItemUrl = url;
+
+  const btn = event.currentTarget;
+  const rect = btn.getBoundingClientRect();
+
+  itemDropdownMenu.style.top = `${rect.bottom + 4}px`;
+  itemDropdownMenu.style.left = `${rect.right - 160}px`;
+  itemDropdownMenu.style.display = "block";
+
+  document
+    .querySelectorAll(".btn-more")
+    .forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+}
+
+function closeItemMenu() {
+  itemDropdownMenu.style.display = "none";
+  currentDropdownItemId = null;
+  currentDropdownItemUrl = null;
+  document
+    .querySelectorAll(".btn-more")
+    .forEach((b) => b.classList.remove("active"));
+}
+
+dropdownEdit.addEventListener("click", () => {
+  if (currentDropdownItemId) {
+    openEditModal(currentDropdownItemId);
+  }
+  closeItemMenu();
+});
+
+dropdownOpenUrl.addEventListener("click", () => {
+  if (currentDropdownItemUrl) {
+    window.open(currentDropdownItemUrl, "_blank", "noopener");
+  }
+  closeItemMenu();
+});
+
+document.addEventListener("click", (e) => {
+  if (
+    !e.target.closest(".item-dropdown-menu") &&
+    !e.target.closest(".btn-more")
+  ) {
+    closeItemMenu();
+  }
+});
+
+// Reader view functions
+async function openReader(id, url, title, type) {
+  currentReaderId = id;
+  readerIframe = null;
+  currentHighlights = [];
+  readerModal.style.display = "flex";
+  readerTitle.textContent = title;
+  readerOpenOriginal.href = url;
+
+  // Load highlights for this item
+  await loadHighlights(id);
+
+  // Show loading state
+  readerContent.innerHTML = `
+    <div class="reader-loading">
+      <div class="reader-spinner"></div>
+      <p>Loading content...</p>
+    </div>
+  `;
+
+  // Handle different content types
+  if (type === "video") {
+    const youtubeMatch = url.match(
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?]+)/,
+    );
+    const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+
+    if (youtubeMatch) {
+      readerContent.innerHTML = `<iframe src="https://www.youtube.com/embed/${youtubeMatch[1]}" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe>`;
+      return;
+    } else if (vimeoMatch) {
+      readerContent.innerHTML = `<iframe src="https://player.vimeo.com/video/${vimeoMatch[1]}" allowfullscreen></iframe>`;
+      return;
+    }
+  }
+
+  if (type === "pdf" || url.toLowerCase().endsWith(".pdf")) {
+    readerContent.innerHTML = `<iframe src="${url}"></iframe>`;
+    return;
+  }
+
+  // For articles and other content, use the proxy
+  try {
+    const response = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
+    const data = await response.json();
+
+    if (data.error) {
+      showReaderError(url, data.message || "Failed to load content");
+      return;
+    }
+
+    if (data.type === "html") {
+      const iframe = document.createElement("iframe");
+      iframe.sandbox = "allow-same-origin allow-popups";
+      readerContent.innerHTML = "";
+      readerContent.appendChild(iframe);
+      readerIframe = iframe;
+
+      const doc = iframe.contentDocument || iframe.contentWindow.document;
+      doc.open();
+      doc.write(data.content);
+      doc.close();
+
+      // Wait for content to load, then apply highlights and setup selection
+      iframe.onload = () => {
+        applyHighlightsToDocument();
+        setupIframeSelectionListener();
+      };
+
+      // Also try immediately in case onload already fired
+      setTimeout(() => {
+        applyHighlightsToDocument();
+        setupIframeSelectionListener();
+      }, 100);
+    } else if (data.type === "pdf") {
+      readerContent.innerHTML = `<iframe src="${data.url}"></iframe>`;
+    } else {
+      showReaderError(
+        url,
+        `This content type (${data.contentType || "unknown"}) cannot be displayed inline.`,
+      );
+    }
+  } catch (error) {
+    showReaderError(
+      url,
+      "Failed to load content. The site may not allow embedding.",
+    );
+  }
+}
+
+function showReaderError(url, message) {
+  readerContent.innerHTML = `
+    <div class="reader-error">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="48" height="48">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <p>${message}</p>
+      <p><a href="${url}" target="_blank" rel="noopener">Open in new tab →</a></p>
+    </div>
+  `;
+}
+
+function closeReader() {
+  readerModal.style.display = "none";
+  readerContent.innerHTML = "";
+  currentReaderId = null;
+  readerIframe = null;
+  currentHighlights = [];
+  hideSelectionPopup();
+}
+
+readerClose.addEventListener("click", closeReader);
+
+// Toggle sidebar
+readerToggleNotes.addEventListener("click", () => {
+  readerSidebar.classList.toggle("hidden");
+  readerToggleNotes.classList.toggle("active");
+});
+
+// Highlights functionality
+async function loadHighlights(itemId) {
+  try {
+    const response = await fetch(`/api/items/${itemId}/highlights`);
+    currentHighlights = await response.json();
+    renderSidebarHighlights();
+  } catch (error) {
+    console.error("Failed to load highlights:", error);
+    currentHighlights = [];
+  }
+}
+
+function renderSidebarHighlights() {
+  if (currentHighlights.length === 0) {
+    highlightsCount.textContent = "";
+    sidebarHighlights.innerHTML = `
+      <div class="sidebar-empty">
+        <p>No highlights yet</p>
+        <p class="empty-hint">Select text to highlight</p>
+      </div>
+    `;
+    return;
+  }
+
+  highlightsCount.textContent = `(${currentHighlights.length})`;
+  sidebarHighlights.innerHTML = currentHighlights
+    .map(
+      (h) => `
+    <div class="sidebar-highlight" data-id="${h.id}">
+      <div class="sidebar-highlight-quote" onclick="scrollToHighlight('${escapeHtml(h.selected_text).replace(/'/g, "\\'")}')">
+        ${escapeHtml(h.selected_text.length > 150 ? h.selected_text.substring(0, 150) + "..." : h.selected_text)}
+      </div>
+      ${h.note ? `<div class="sidebar-highlight-note">${escapeHtml(h.note)}</div>` : ""}
+      <div class="sidebar-highlight-actions">
+        <button class="sidebar-highlight-btn" onclick="editHighlight(${h.id})">Edit</button>
+        <button class="sidebar-highlight-btn delete" onclick="deleteHighlight(${h.id})">Delete</button>
+      </div>
+    </div>
+  `,
+    )
+    .join("");
+}
+
+function applyHighlightsToDocument() {
+  if (!readerIframe || currentHighlights.length === 0) return;
+
+  try {
+    const doc =
+      readerIframe.contentDocument || readerIframe.contentWindow.document;
+    if (!doc || !doc.body) return;
+
+    // Add highlight styles
+    const style = doc.createElement("style");
+    style.textContent = `
+      .reading-list-highlight {
+        background-color: rgba(59, 130, 246, 0.3);
+        border-radius: 2px;
+        padding: 0 2px;
+        margin: 0 -2px;
+      }
+      .reading-list-highlight:hover {
+        background-color: rgba(59, 130, 246, 0.5);
+      }
+    `;
+    doc.head.appendChild(style);
+
+    // Apply each highlight
+    currentHighlights.forEach((highlight) => {
+      highlightTextInDocument(doc, highlight.selected_text);
+    });
+  } catch (error) {
+    console.error("Failed to apply highlights:", error);
+  }
+}
+
+function highlightTextInDocument(doc, text) {
+  const walker = doc.createTreeWalker(
+    doc.body,
+    NodeFilter.SHOW_TEXT,
+    null,
+    false,
+  );
+
+  const nodesToHighlight = [];
+  let node;
+
+  // Normalize the search text
+  const normalizedSearchText = text.replace(/\s+/g, " ").trim();
+
+  while ((node = walker.nextNode())) {
+    const nodeText = node.textContent;
+    const normalizedNodeText = nodeText.replace(/\s+/g, " ");
+
+    // Check if this node contains part of our text
+    if (
+      normalizedSearchText.includes(normalizedNodeText.trim()) ||
+      normalizedNodeText.includes(normalizedSearchText)
+    ) {
+      const index = normalizedNodeText.indexOf(normalizedSearchText);
+      if (index !== -1) {
+        nodesToHighlight.push({
+          node,
+          index,
+          length: normalizedSearchText.length,
+        });
+      }
+    }
+  }
+
+  // Apply highlights (in reverse to not mess up indices)
+  nodesToHighlight.reverse().forEach(({ node, index, length }) => {
+    try {
+      const range = doc.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, Math.min(index + length, node.textContent.length));
+
+      const span = doc.createElement("span");
+      span.className = "reading-list-highlight";
+      range.surroundContents(span);
+    } catch (e) {
+      // Range might be invalid, skip this highlight
+    }
+  });
+}
+
+function scrollToHighlight(text) {
+  if (!readerIframe) return;
+
+  try {
+    const doc =
+      readerIframe.contentDocument || readerIframe.contentWindow.document;
+    const highlights = doc.querySelectorAll(".reading-list-highlight");
+
+    for (const el of highlights) {
+      if (el.textContent.includes(text.substring(0, 50))) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+        // Flash effect
+        el.style.backgroundColor = "rgba(59, 130, 246, 0.7)";
+        setTimeout(() => {
+          el.style.backgroundColor = "";
+        }, 1000);
+        break;
+      }
+    }
+  } catch (error) {
+    console.error("Failed to scroll to highlight:", error);
+  }
+}
+
+// Selection handling in iframe
+function setupIframeSelectionListener() {
+  if (!readerIframe) return;
+
+  try {
+    const doc =
+      readerIframe.contentDocument || readerIframe.contentWindow.document;
+
+    doc.addEventListener("mouseup", handleIframeSelection);
+    doc.addEventListener("touchend", handleIframeSelection);
+
+    // Hide popup when clicking elsewhere
+    doc.addEventListener("mousedown", (e) => {
+      if (!e.target.closest(".selection-popup")) {
+        hideSelectionPopup();
+      }
+    });
+  } catch (error) {
+    console.error("Failed to setup iframe selection listener:", error);
+  }
+}
+
+function handleIframeSelection() {
+  setTimeout(() => {
+    if (!readerIframe) return;
+
+    try {
+      const doc =
+        readerIframe.contentDocument || readerIframe.contentWindow.document;
+      const selection = doc.getSelection();
+      const selectedText = selection ? selection.toString().trim() : "";
+
+      if (selectedText.length > 0) {
+        showSelectionPopup(selection);
+      } else {
+        hideSelectionPopup();
+      }
+    } catch (error) {
+      console.error("Failed to handle iframe selection:", error);
+    }
+  }, 10);
+}
+
+function showSelectionPopup(selection) {
+  if (!selection || selection.rangeCount === 0) return;
+
+  const range = selection.getRangeAt(0);
+  const rect = range.getBoundingClientRect();
+
+  // Get iframe position
+  const iframeRect = readerIframe.getBoundingClientRect();
+
+  // Position popup above the selection
+  const popupX = iframeRect.left + rect.left + rect.width / 2 - 50;
+  const popupY = iframeRect.top + rect.top - 45;
+
+  selectionPopup.style.left = `${Math.max(10, popupX)}px`;
+  selectionPopup.style.top = `${Math.max(10, popupY)}px`;
+  selectionPopup.style.display = "block";
+
+  pendingSelectionText = selection.toString().trim();
+}
+
+function hideSelectionPopup() {
+  selectionPopup.style.display = "none";
+  pendingSelectionText = "";
+}
+
+// Highlight button click
+popupHighlightBtn.addEventListener("click", () => {
+  if (pendingSelectionText) {
+    openNoteModal(pendingSelectionText);
+    hideSelectionPopup();
+  }
+});
+
+// Note modal functions
+function openNoteModal(selectedText) {
+  noteModalQuote.textContent = selectedText;
+  noteModalText.value = "";
+  noteModal.style.display = "flex";
+  noteModalText.focus();
+}
+
+function closeNoteModal() {
+  noteModal.style.display = "none";
+  noteModalQuote.textContent = "";
+  noteModalText.value = "";
+}
+
+noteModalClose.addEventListener("click", closeNoteModal);
+noteModalCancel.addEventListener("click", closeNoteModal);
+noteModal.addEventListener("click", (e) => {
+  if (e.target === noteModal) closeNoteModal();
+});
+
+noteModalSave.addEventListener("click", async () => {
+  if (!currentReaderId || !noteModalQuote.textContent) return;
+
+  const selectedText = noteModalQuote.textContent;
+  const note = noteModalText.value.trim();
+
+  try {
+    const response = await fetch(`/api/items/${currentReaderId}/highlights`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selected_text: selectedText, note }),
+    });
+
+    if (response.ok) {
+      const highlight = await response.json();
+      currentHighlights.push(highlight);
+      renderSidebarHighlights();
+      applyHighlightsToDocument();
+
+      // Show sidebar if hidden
+      if (readerSidebar.classList.contains("hidden")) {
+        readerSidebar.classList.remove("hidden");
+        readerToggleNotes.classList.add("active");
+      }
+
+      closeNoteModal();
+    }
+  } catch (error) {
+    console.error("Failed to save highlight:", error);
+    alert("Failed to save highlight. Please try again.");
+  }
+});
+
+async function editHighlight(highlightId) {
+  const highlight = currentHighlights.find((h) => h.id === highlightId);
+  if (!highlight) return;
+
+  const newNote = prompt("Edit note:", highlight.note || "");
+  if (newNote === null) return;
+
+  try {
+    await fetch(`/api/highlights/${highlightId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note: newNote }),
+    });
+
+    highlight.note = newNote;
+    renderSidebarHighlights();
+  } catch (error) {
+    console.error("Failed to update highlight:", error);
+  }
+}
+
+async function deleteHighlight(highlightId) {
+  if (!confirm("Delete this highlight?")) return;
+
+  try {
+    await fetch(`/api/highlights/${highlightId}`, { method: "DELETE" });
+    currentHighlights = currentHighlights.filter((h) => h.id !== highlightId);
+    renderSidebarHighlights();
+
+    // Remove highlight from document
+    if (readerIframe) {
+      try {
+        const doc =
+          readerIframe.contentDocument || readerIframe.contentWindow.document;
+        const highlights = doc.querySelectorAll(".reading-list-highlight");
+        highlights.forEach((el) => {
+          const parent = el.parentNode;
+          while (el.firstChild) {
+            parent.insertBefore(el.firstChild, el);
+          }
+          parent.removeChild(el);
+        });
+        // Re-apply remaining highlights
+        applyHighlightsToDocument();
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+  } catch (error) {
+    console.error("Failed to delete highlight:", error);
+  }
+}
+
+// All highlights view (Notes & Highlights tab)
+async function loadAllHighlights() {
+  try {
+    const response = await fetch("/api/highlights");
+    const highlights = await response.json();
+    renderAllHighlights(highlights);
+  } catch (error) {
+    console.error("Failed to load all highlights:", error);
+    notesList.innerHTML = `
+      <div class="empty-state">
+        <p>Failed to load highlights</p>
+      </div>
+    `;
+  }
+}
+
+function renderAllHighlights(highlights) {
+  if (highlights.length === 0) {
+    notesList.innerHTML = `
+      <div class="empty-state">
+        <p>No highlights yet</p>
+        <p class="empty-hint">Select text while reading to save highlights and notes</p>
+      </div>
+    `;
+    return;
+  }
+
+  notesList.innerHTML = highlights
+    .map(
+      (h) => `
+    <div class="highlight-card" data-id="${h.id}">
+      <div class="highlight-card-header">
+        <div class="highlight-card-source">
+          <a href="#" onclick="openReaderFromHighlight(${h.item_id}, '${escapeHtml(h.item_url).replace(/'/g, "\\'")}', '${escapeHtml(h.item_title).replace(/'/g, "\\'")}', '${h.item_type}'); return false;">
+            ${escapeHtml(h.item_title || "Untitled")}
+          </a>
+        </div>
+        <span class="highlight-card-date">${formatDate(h.created_at)}</span>
+      </div>
+      <div class="highlight-card-quote">${escapeHtml(h.selected_text)}</div>
+      ${h.note ? `<div class="highlight-card-note">${escapeHtml(h.note)}</div>` : ""}
+      <div class="highlight-card-actions">
+        <button class="highlight-card-btn" onclick="editHighlightFromList(${h.id}, '${escapeHtml(h.note || "").replace(/'/g, "\\'")}')">Edit Note</button>
+        <button class="highlight-card-btn delete" onclick="deleteHighlightFromList(${h.id})">Delete</button>
+      </div>
+    </div>
+  `,
+    )
+    .join("");
+}
+
+async function openReaderFromHighlight(itemId, url, title, type) {
+  // Switch to reading list view
+  viewTabs.forEach((t) => t.classList.remove("active"));
+  viewTabs[0].classList.add("active");
+  readingListView.style.display = "";
+  notesView.style.display = "none";
+
+  // Open reader
+  await openReader(itemId, url, title, type);
+}
+
+async function editHighlightFromList(highlightId, currentNote) {
+  const newNote = prompt("Edit note:", currentNote);
+  if (newNote === null) return;
+
+  try {
+    await fetch(`/api/highlights/${highlightId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note: newNote }),
+    });
+    loadAllHighlights();
+  } catch (error) {
+    console.error("Failed to update highlight:", error);
+  }
+}
+
+async function deleteHighlightFromList(highlightId) {
+  if (!confirm("Delete this highlight?")) return;
+
+  try {
+    await fetch(`/api/highlights/${highlightId}`, { method: "DELETE" });
+    loadAllHighlights();
+  } catch (error) {
+    console.error("Failed to delete highlight:", error);
+  }
+}
+
+// Close reader with Escape key
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if (noteModal.style.display !== "none") {
+      closeNoteModal();
+    } else if (readerModal.style.display !== "none") {
+      closeReader();
+    } else if (editModal.style.display !== "none") {
+      closeEditModal();
+    }
+    closeItemMenu();
+    hideSelectionPopup();
+  }
+});
+
 async function toggleRead(id, currentStatus) {
   await fetch(`/api/items/${id}`, {
     method: "PATCH",
@@ -462,11 +1124,73 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+function extractUrlFromText(text) {
+  if (!text) return "";
+  const match = text.match(/https?:\/\/[^\s]+/i);
+  return match ? match[0] : "";
+}
+
+function handleShareTarget() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("url") && !params.has("text") && !params.has("title")) {
+    return;
+  }
+
+  const rawUrl = (params.get("url") || "").trim();
+  const rawText = (params.get("text") || "").trim();
+  const rawTitle = (params.get("title") || "").trim();
+
+  let sharedUrl = rawUrl;
+  if (!sharedUrl && rawText) {
+    sharedUrl = extractUrlFromText(rawText);
+  }
+
+  if (sharedUrl && isValidUrl(sharedUrl)) {
+    urlInput.value = sharedUrl;
+    urlInput.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  if (rawTitle && !titleInput.value) {
+    titleInput.value = rawTitle;
+  } else if (rawText && !titleInput.value && rawText !== sharedUrl) {
+    titleInput.value = rawText;
+  }
+
+  if (sharedUrl && isValidUrl(sharedUrl)) {
+    setTimeout(() => {
+      if (urlInput.value.trim() === sharedUrl) {
+        if (typeof form.requestSubmit === "function") {
+          form.requestSubmit();
+        } else {
+          form.dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          );
+        }
+      }
+    }, 350);
+  }
+
+  if (window.location.search) {
+    const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+    window.history.replaceState({}, document.title, cleanUrl);
+  }
+}
+
+// Expose functions globally
 window.filterByTag = filterByTag;
 window.toggleRead = toggleRead;
 window.deleteItem = deleteItem;
 window.openEditModal = openEditModal;
+window.openItemMenu = openItemMenu;
+window.openReader = openReader;
+window.scrollToHighlight = scrollToHighlight;
+window.editHighlight = editHighlight;
+window.deleteHighlight = deleteHighlight;
+window.openReaderFromHighlight = openReaderFromHighlight;
+window.editHighlightFromList = editHighlightFromList;
+window.deleteHighlightFromList = deleteHighlightFromList;
 
+// Theme toggle
 const themeToggle = document.getElementById("theme-toggle");
 const storedTheme = localStorage.getItem("theme");
 
@@ -482,5 +1206,7 @@ themeToggle.addEventListener("click", () => {
   localStorage.setItem("theme", isDark ? "dark" : "light");
 });
 
+// Initialize
 loadItems();
 loadTags();
+handleShareTarget();

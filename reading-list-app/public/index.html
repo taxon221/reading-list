@@ -6,6 +6,14 @@
         <meta name="description" content="Personal reading list manager" />
         <meta name="theme-color" content="#111111" />
         <title>Reading List</title>
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="apple-touch-icon" href="/static/icon-180.png" />
+        <link
+            rel="icon"
+            type="image/png"
+            sizes="192x192"
+            href="/static/icon-192.png"
+        />
         <link
             rel="icon"
             href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2'><path d='M4 19.5A2.5 2.5 0 0 1 6.5 17H20'/><path d='M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'/></svg>"
@@ -101,94 +109,340 @@
                 </form>
             </section>
 
-            <section class="filters">
-                <div class="filter-dropdown" id="type-dropdown">
+            <nav class="view-tabs">
+                <button
+                    type="button"
+                    class="view-tab active"
+                    data-view="reading-list"
+                >
+                    Reading List
+                </button>
+                <button type="button" class="view-tab" data-view="notes">
+                    Notes & Highlights
+                </button>
+            </nav>
+
+            <div id="reading-list-view">
+                <section class="filters">
+                    <div class="filter-dropdown" id="type-dropdown">
+                        <button
+                            type="button"
+                            class="filter-btn"
+                            id="type-filter-btn"
+                        >
+                            <span class="filter-label">Type</span>
+                            <span class="filter-value" id="type-filter-value"
+                                >All</span
+                            >
+                            <span class="filter-arrow">▾</span>
+                        </button>
+                        <div class="dropdown-menu" id="type-menu">
+                            <div class="dropdown-search">
+                                <input
+                                    type="text"
+                                    placeholder="Search..."
+                                    id="type-search"
+                                    autocomplete="off"
+                                />
+                            </div>
+                            <div class="dropdown-options" id="type-options">
+                                <label
+                                    class="dropdown-option"
+                                    data-value="article"
+                                >
+                                    <input type="checkbox" value="article" />
+                                    Article
+                                </label>
+                                <label
+                                    class="dropdown-option"
+                                    data-value="video"
+                                >
+                                    <input type="checkbox" value="video" />
+                                    Video
+                                </label>
+                                <label class="dropdown-option" data-value="pdf">
+                                    <input type="checkbox" value="pdf" />
+                                    PDF
+                                </label>
+                                <label
+                                    class="dropdown-option"
+                                    data-value="podcast"
+                                >
+                                    <input type="checkbox" value="podcast" />
+                                    Podcast
+                                </label>
+                            </div>
+                            <div class="dropdown-actions">
+                                <button
+                                    type="button"
+                                    class="dropdown-clear"
+                                    id="type-clear"
+                                >
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="filter-dropdown" id="tag-dropdown">
+                        <button
+                            type="button"
+                            class="filter-btn"
+                            id="tag-filter-btn"
+                        >
+                            <span class="filter-label">Tags</span>
+                            <span class="filter-value" id="tag-filter-value"
+                                >All</span
+                            >
+                            <span class="filter-arrow">▾</span>
+                        </button>
+                        <div class="dropdown-menu" id="tag-menu">
+                            <div class="dropdown-search">
+                                <input
+                                    type="text"
+                                    placeholder="Search tags..."
+                                    id="tag-search"
+                                    autocomplete="off"
+                                />
+                            </div>
+                            <div
+                                class="dropdown-options"
+                                id="tag-options"
+                            ></div>
+                            <div class="dropdown-actions">
+                                <button
+                                    type="button"
+                                    class="dropdown-clear"
+                                    id="tag-clear"
+                                >
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="items-list" id="items-list"></section>
+            </div>
+
+            <div id="notes-view" style="display: none">
+                <section class="notes-list" id="notes-list">
+                    <div class="empty-state">
+                        <p>No highlights yet</p>
+                        <p class="empty-hint">
+                            Select text while reading to save highlights and
+                            notes
+                        </p>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Selection Popup (appears when text is selected in reader) -->
+        <div class="selection-popup" id="selection-popup" style="display: none">
+            <button
+                type="button"
+                class="popup-highlight-btn"
+                id="popup-highlight-btn"
+                title="Highlight"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="16"
+                    height="16"
+                >
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                    <path d="M2 17l10 5 10-5"></path>
+                    <path d="M2 12l10 5 10-5"></path>
+                </svg>
+                Highlight
+            </button>
+        </div>
+
+        <!-- Add Note Modal (appears after highlighting) -->
+        <div class="note-modal-overlay" id="note-modal" style="display: none">
+            <div class="note-modal">
+                <div class="note-modal-header">
+                    <h3>Add Note</h3>
                     <button
                         type="button"
-                        class="filter-btn"
-                        id="type-filter-btn"
+                        class="modal-close"
+                        id="note-modal-close"
                     >
-                        <span class="filter-label">Type</span>
-                        <span class="filter-value" id="type-filter-value"
-                            >All</span
-                        >
-                        <span class="filter-arrow">▾</span>
+                        ×
                     </button>
-                    <div class="dropdown-menu" id="type-menu">
-                        <div class="dropdown-search">
-                            <input
-                                type="text"
-                                placeholder="Search..."
-                                id="type-search"
-                                autocomplete="off"
-                            />
-                        </div>
-                        <div class="dropdown-options" id="type-options">
-                            <label class="dropdown-option" data-value="article">
-                                <input type="checkbox" value="article" />
-                                Article
-                            </label>
-                            <label class="dropdown-option" data-value="video">
-                                <input type="checkbox" value="video" />
-                                Video
-                            </label>
-                            <label class="dropdown-option" data-value="pdf">
-                                <input type="checkbox" value="pdf" />
-                                PDF
-                            </label>
-                            <label class="dropdown-option" data-value="podcast">
-                                <input type="checkbox" value="podcast" />
-                                Podcast
-                            </label>
-                        </div>
-                        <div class="dropdown-actions">
-                            <button
-                                type="button"
-                                class="dropdown-clear"
-                                id="type-clear"
+                </div>
+                <div class="note-modal-quote" id="note-modal-quote"></div>
+                <textarea
+                    id="note-modal-text"
+                    placeholder="Add your thoughts (optional)..."
+                    rows="3"
+                ></textarea>
+                <div class="note-modal-actions">
+                    <button
+                        type="button"
+                        class="btn-secondary"
+                        id="note-modal-cancel"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        class="btn-primary"
+                        id="note-modal-save"
+                    >
+                        Save Highlight
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Reader View Modal -->
+        <div class="reader-overlay" id="reader-modal" style="display: none">
+            <div class="reader-container">
+                <div class="reader-header">
+                    <div class="reader-title" id="reader-title">Loading...</div>
+                    <div class="reader-actions">
+                        <button
+                            type="button"
+                            class="reader-btn"
+                            id="reader-toggle-notes"
+                            title="Toggle notes"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
                             >
-                                Clear
-                            </button>
+                                <path
+                                    d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                                ></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                                <polyline points="10 9 9 9 8 9"></polyline>
+                            </svg>
+                        </button>
+                        <a
+                            href="#"
+                            id="reader-open-original"
+                            class="reader-btn"
+                            target="_blank"
+                            rel="noopener"
+                            title="Open original"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path
+                                    d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                                ></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </a>
+                        <button
+                            type="button"
+                            class="reader-btn reader-close"
+                            id="reader-close"
+                            title="Close"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="reader-body">
+                    <div class="reader-content" id="reader-content">
+                        <div class="reader-loading">
+                            <div class="reader-spinner"></div>
+                            <p>Loading content...</p>
+                        </div>
+                    </div>
+                    <div class="reader-sidebar" id="reader-sidebar">
+                        <div class="sidebar-header">
+                            <h3>Highlights</h3>
+                            <span
+                                class="highlights-count"
+                                id="highlights-count"
+                            ></span>
+                        </div>
+                        <div class="sidebar-highlights" id="sidebar-highlights">
+                            <div class="sidebar-empty">
+                                <p>No highlights yet</p>
+                                <p class="empty-hint">
+                                    Select text to highlight
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
 
-                <div class="filter-dropdown" id="tag-dropdown">
-                    <button
-                        type="button"
-                        class="filter-btn"
-                        id="tag-filter-btn"
-                    >
-                        <span class="filter-label">Tags</span>
-                        <span class="filter-value" id="tag-filter-value"
-                            >All</span
-                        >
-                        <span class="filter-arrow">▾</span>
-                    </button>
-                    <div class="dropdown-menu" id="tag-menu">
-                        <div class="dropdown-search">
-                            <input
-                                type="text"
-                                placeholder="Search tags..."
-                                id="tag-search"
-                                autocomplete="off"
-                            />
-                        </div>
-                        <div class="dropdown-options" id="tag-options"></div>
-                        <div class="dropdown-actions">
-                            <button
-                                type="button"
-                                class="dropdown-clear"
-                                id="tag-clear"
-                            >
-                                Clear
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <section class="items-list" id="items-list"></section>
+        <!-- Item Dropdown Menu (positioned dynamically) -->
+        <div
+            class="item-dropdown-menu"
+            id="item-dropdown-menu"
+            style="display: none"
+        >
+            <button type="button" class="dropdown-item" id="dropdown-edit">
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <path
+                        d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                    ></path>
+                    <path
+                        d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                    ></path>
+                </svg>
+                Edit
+            </button>
+            <button type="button" class="dropdown-item" id="dropdown-open-url">
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <path
+                        d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                    ></path>
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+                Open original URL
+            </button>
         </div>
 
         <div class="modal-overlay" id="edit-modal" style="display: none">

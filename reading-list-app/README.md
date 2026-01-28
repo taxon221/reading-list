@@ -5,8 +5,10 @@ A minimal, self-hosted reading list manager. Save articles, videos, PDFs, and po
 ## Features
 
 - Save links with title, type (article/video/pdf/podcast), and tags
-- Filter by tags
+- Filter by tags and type
 - Mark items as read/unread
+- Built-in reader with highlights and notes
+- Notes & highlights view
 - Clean, minimal interface
 - SQLite database (no external dependencies)
 - Single binary deployment with Bun
@@ -15,111 +17,24 @@ A minimal, self-hosted reading list manager. Save articles, videos, PDFs, and po
 
 - [Bun](https://bun.sh) v1.0 or later
 
-## Quick Start
+## Run Directly (Bun)
 
-1. **Install dependencies**
+```bash
+bun install
+bun run dev
+```
 
-   ```bash
-   bun install
-   ```
-
-2. **Run the development server**
-
-   ```bash
-   bun run dev
-   ```
-
-3. **Open in browser**
-
-   Navigate to [http://localhost:3000](http://localhost:3000)
-
-## Production
-
-### Option 1: Direct Run
+Open [http://localhost:3000](http://localhost:3000). For production, run:
 
 ```bash
 bun run start
 ```
 
-### Option 2: With Custom Port
-
-```bash
-PORT=8080 bun run start
-```
-
-### Option 3: Docker
-
-Build and run with Docker:
+## Run with Docker
 
 ```bash
 docker build -t reading-list .
 docker run -d -p 3000:3000 -v reading-list-data:/app/data reading-list
-```
-
-### Option 4: Systemd Service
-
-Create `/etc/systemd/system/reading-list.service`:
-
-```ini
-[Unit]
-Description=Reading List App
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/opt/reading-list
-ExecStart=/usr/local/bin/bun run start
-Restart=on-failure
-Environment=PORT=3000
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then:
-
-```bash
-sudo systemctl enable reading-list
-sudo systemctl start reading-list
-```
-
-## Deployment with a Domain
-
-### Using Caddy (Recommended)
-
-Install [Caddy](https://caddyserver.com) and create a Caddyfile:
-
-```
-yourdomain.com {
-    reverse_proxy localhost:3000
-}
-```
-
-Caddy automatically handles HTTPS certificates.
-
-### Using Nginx
-
-```nginx
-server {
-    listen 80;
-    server_name yourdomain.com;
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-```
-
-Use [Certbot](https://certbot.eff.org/) for HTTPS:
-
-```bash
-sudo certbot --nginx -d yourdomain.com
 ```
 
 ## Data
@@ -130,14 +45,22 @@ For Docker deployments, the data directory is mounted as a volume to persist dat
 
 ## API Endpoints
 
-| Method | Endpoint         | Description              |
-| ------ | ---------------- | ------------------------ |
-| GET    | `/api/items`     | Get all items            |
-| GET    | `/api/items?tag=x` | Get items filtered by tag |
-| POST   | `/api/items`     | Add new item             |
-| PATCH  | `/api/items/:id` | Update item (read status) |
-| DELETE | `/api/items/:id` | Delete item              |
-| GET    | `/api/tags`      | Get all tags             |
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/api/items` | Get items (supports `tags` and `types` query params) |
+| GET | `/api/items/:id` | Get a single item |
+| POST | `/api/items` | Add new item |
+| PATCH | `/api/items/:id` | Update item fields (`is_read`, `title`, `notes`) |
+| PUT | `/api/items/:id` | Replace item (url/title/type/tags/notes) |
+| DELETE | `/api/items/:id` | Delete item |
+| GET | `/api/tags` | Get all tags |
+| GET | `/api/fetch-meta` | Fetch metadata for a URL (`?url=`) |
+| GET | `/api/proxy` | Reader proxy for external content (`?url=`) |
+| GET | `/api/highlights` | Get all highlights |
+| GET | `/api/items/:id/highlights` | Get highlights for an item |
+| POST | `/api/items/:id/highlights` | Create highlight (selected_text, note) |
+| PATCH | `/api/highlights/:id` | Update highlight note |
+| DELETE | `/api/highlights/:id` | Delete highlight |
 
 ### Add Item Example
 
@@ -155,10 +78,15 @@ reading-list-app/
 │   ├── index.ts      # Server entry point
 │   └── db.ts         # Database setup
 ├── public/
-│   ├── index.html    # Main page
+│   ├── index.html
+│   ├── manifest.webmanifest
 │   └── static/
+│       ├── app.js
 │       ├── styles.css
-│       └── app.js
+│       ├── icon.svg
+│       ├── icon-180.png
+│       ├── icon-192.png
+│       └── icon-512.png
 ├── package.json
 ├── Dockerfile
 └── README.md
