@@ -10,15 +10,19 @@ let currentReaderId = null;
 let readerIframe = null;
 let currentHighlights = [];
 let pendingSelectionText = "";
+let searchQuery = "";
+let editAuthorValue = "";
 
 const form = document.getElementById("add-item-form");
 const urlInput = document.getElementById("url");
 const titleInput = document.getElementById("title");
+const authorInput = document.getElementById("author");
 const typeSelect = document.getElementById("type-select");
 const tagInput = document.getElementById("tag-input");
 const tagsContainer = document.getElementById("tags-input");
 const submitBtn = document.getElementById("submit-btn");
 const itemsList = document.getElementById("items-list");
+const searchInput = document.getElementById("search-input");
 
 const typeDropdown = document.getElementById("type-dropdown");
 const typeFilterBtn = document.getElementById("type-filter-btn");
@@ -147,6 +151,7 @@ urlInput.addEventListener("input", (e) => {
 
   if (!url || !isValidUrl(url)) {
     titleInput.value = "";
+    authorInput.value = "";
     typeSelect.value = "article";
     return;
   }
@@ -158,6 +163,7 @@ urlInput.addEventListener("input", (e) => {
     if (meta && urlInput.value.trim() === url) {
       fetchedMeta = meta;
       titleInput.value = meta.title || "";
+      authorInput.value = meta.author || "";
       typeSelect.value = meta.type || "article";
     }
     isFetching = false;
@@ -216,12 +222,14 @@ form.addEventListener("submit", async (e) => {
     if (isFetching) await new Promise((r) => setTimeout(r, 500));
 
     let title = titleInput.value.trim();
+    let author = authorInput.value.trim() || fetchedMeta?.author || "";
     let type = typeSelect.value;
 
     if (!title && !fetchedMeta) {
       const meta = await fetchMetadata(url);
       if (meta) {
         title = meta.title || "";
+        author = author || meta.author || "";
         type = meta.type || type;
       }
     }
@@ -229,7 +237,7 @@ form.addEventListener("submit", async (e) => {
     const response = await fetch("/api/items", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, title, type, tags: pendingTags }),
+      body: JSON.stringify({ url, title, author, type, tags: pendingTags }),
     });
 
     if (response.ok) {
@@ -246,6 +254,75 @@ form.addEventListener("submit", async (e) => {
   }
 });
 
+function parseSearchQuery(input) {
+  const fieldTokens = [];
+  const freeTerms = [];
+  const pattern =
+    /(?:(title|author|url)\s*:\s*(~)?)\s*(?:"([^"]*)"|(\S+))|(?:"([^"]*)"|(\S+))/gi;
+  let match;
+
+  while ((match = pattern.exec(input)) !== null) {
+    const field = (match[1] || "").toLowerCase();
+    const isRegex = Boolean(match[2]);
+    const fieldValue = (match[3] || match[4] || "").trim();
+    const freeValue = (match[5] || match[6] || "").trim();
+
+    if (field && fieldValue) {
+      fieldTokens.push({ field, isRegex, value: fieldValue });
+      continue;
+    }
+
+    if (freeValue) freeTerms.push(freeValue);
+  }
+
+  return { fieldTokens, freeTerms };
+}
+
+function safeRegex(pattern) {
+  try {
+    return new RegExp(pattern, "i");
+  } catch {
+    return null;
+  }
+}
+
+function getItemFieldValue(item, field) {
+  if (field === "title") return item.title || "";
+  if (field === "author") return item.author || "";
+  if (field === "url") return item.url || "";
+  return "";
+}
+
+function applySearch(items) {
+  const query = searchQuery.trim();
+  if (!query) return items;
+
+  const parsed = parseSearchQuery(query);
+  if (parsed.fieldTokens.length === 0 && parsed.freeTerms.length === 0) {
+    return items;
+  }
+
+  return items.filter((item) => {
+    for (const token of parsed.fieldTokens) {
+      const haystack = getItemFieldValue(item, token.field);
+      if (token.isRegex) {
+        const regex = safeRegex(token.value);
+        if (!regex || !regex.test(haystack)) return false;
+      } else if (haystack.trim().toLowerCase() !== token.value.toLowerCase()) {
+        return false;
+      }
+    }
+
+    if (parsed.freeTerms.length === 0) return true;
+
+    const combined =
+      `${item.title || ""} ${item.author || ""} ${item.url || ""}`.toLowerCase();
+    return parsed.freeTerms.every((term) =>
+      combined.includes(term.toLowerCase()),
+    );
+  });
+}
+
 async function loadItems() {
   const params = new URLSearchParams();
   if (selectedTags.length > 0) params.set("tags", selectedTags.join(","));
@@ -253,7 +330,7 @@ async function loadItems() {
   const url = `/api/items${params.toString() ? "?" + params.toString() : ""}`;
   const response = await fetch(url);
   const items = await response.json();
-  renderItems(items);
+  renderItems(applySearch(items));
 }
 
 async function loadTags() {
@@ -451,6 +528,15 @@ function filterByTag(tag) {
     updateTagFilterDisplay();
     loadItems();
   }
+}
+
+if (searchInput) {
+  let searchDebounce;
+  searchInput.addEventListener("input", (e) => {
+    searchQuery = e.target.value || "";
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(loadItems, 120);
+  });
 }
 
 // View Tabs
@@ -793,6 +879,10 @@ function scrollToHighlight(text) {
   }
 }
 
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 768px)").matches;
+}
+
 // Selection handling in iframe
 function setupIframeSelectionListener() {
   if (!readerIframe) return;
@@ -803,12 +893,10 @@ function setupIframeSelectionListener() {
 
     doc.addEventListener("mouseup", handleIframeSelection);
     doc.addEventListener("touchend", handleIframeSelection);
+    doc.addEventListener("selectionchange", handleIframeSelection);
 
-    // Hide popup when clicking elsewhere
-    doc.addEventListener("mousedown", (e) => {
-      if (!e.target.closest(".selection-popup")) {
-        hideSelectionPopup();
-      }
+    doc.addEventListener("pointerdown", () => {
+      setTimeout(handleIframeSelection, 50);
     });
   } catch (error) {
     console.error("Failed to setup iframe selection listener:", error);
@@ -833,11 +921,24 @@ function handleIframeSelection() {
     } catch (error) {
       console.error("Failed to handle iframe selection:", error);
     }
-  }, 10);
+  }, 35);
 }
 
 function showSelectionPopup(selection) {
   if (!selection || selection.rangeCount === 0) return;
+  const selectedText = selection.toString().trim();
+  if (!selectedText) return;
+  pendingSelectionText = selectedText;
+
+  if (isMobileViewport()) {
+    selectionPopup.classList.add("mobile-fab");
+    selectionPopup.style.left = "";
+    selectionPopup.style.top = "";
+    selectionPopup.style.display = "block";
+    return;
+  }
+
+  selectionPopup.classList.remove("mobile-fab");
 
   const range = selection.getRangeAt(0);
   const rect = range.getBoundingClientRect();
@@ -846,17 +947,20 @@ function showSelectionPopup(selection) {
   const iframeRect = readerIframe.getBoundingClientRect();
 
   // Position popup above the selection
-  const popupX = iframeRect.left + rect.left + rect.width / 2 - 50;
+  const popupX = iframeRect.left + rect.left + rect.width / 2 - 54;
   const popupY = iframeRect.top + rect.top - 45;
+  const clampedX = Math.max(10, Math.min(window.innerWidth - 118, popupX));
+  const clampedY = Math.max(10, popupY);
 
-  selectionPopup.style.left = `${Math.max(10, popupX)}px`;
-  selectionPopup.style.top = `${Math.max(10, popupY)}px`;
+  selectionPopup.style.left = `${clampedX}px`;
+  selectionPopup.style.top = `${clampedY}px`;
   selectionPopup.style.display = "block";
-
-  pendingSelectionText = selection.toString().trim();
 }
 
 function hideSelectionPopup() {
+  selectionPopup.classList.remove("mobile-fab");
+  selectionPopup.style.left = "";
+  selectionPopup.style.top = "";
   selectionPopup.style.display = "none";
   pendingSelectionText = "";
 }
@@ -1098,6 +1202,7 @@ async function deleteItem(id) {
 async function openEditModal(id) {
   const response = await fetch(`/api/items/${id}`);
   const item = await response.json();
+  editAuthorValue = item.author || "";
   editIdInput.value = item.id;
   editUrlInput.value = item.url;
   editTitleInput.value = item.title || "";
@@ -1110,6 +1215,7 @@ async function openEditModal(id) {
 function closeEditModal() {
   editModal.style.display = "none";
   editForm.reset();
+  editAuthorValue = "";
   editTags = [];
   renderTagPills(editTags, editTagsContainer, editTagInput);
 }
@@ -1122,15 +1228,17 @@ editModal.addEventListener("click", (e) => {
 
 editForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+  const payload = {
+    url: editUrlInput.value.trim(),
+    title: editTitleInput.value.trim(),
+    author: editAuthorValue,
+    type: editTypeSelect.value,
+    tags: editTags,
+  };
   await fetch(`/api/items/${editIdInput.value}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      url: editUrlInput.value.trim(),
-      title: editTitleInput.value.trim(),
-      type: editTypeSelect.value,
-      tags: editTags,
-    }),
+    body: JSON.stringify(payload),
   });
   closeEditModal();
   loadItems();

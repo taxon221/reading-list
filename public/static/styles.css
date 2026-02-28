@@ -47,7 +47,7 @@ body {
 }
 
 .container {
-    max-width: 720px;
+    max-width: 920px;
     margin: 0 auto;
     padding: 2rem 1rem 4rem;
 }
@@ -223,6 +223,10 @@ header h1 {
     flex: 2;
 }
 
+.author-input {
+    flex: 1.5;
+}
+
 /* Tags Input */
 .tags-input {
     display: flex;
@@ -294,6 +298,31 @@ header h1 {
 }
 
 /* Filter Dropdowns */
+.search-section {
+    margin-bottom: 0.75rem;
+}
+
+.search-input {
+    width: 100%;
+    padding: 0.625rem 0.75rem;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-family: inherit;
+    background: var(--bg-card);
+    color: var(--text);
+}
+
+.search-input::placeholder {
+    color: var(--text-light);
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
 .filters {
     display: flex;
     gap: 0.75rem;
@@ -945,8 +974,8 @@ header h1 {
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg);
+    border-bottom: none;
+    background: var(--bg-card);
 }
 
 .highlight-card-source {
@@ -1075,6 +1104,31 @@ header h1 {
     stroke: white;
 }
 
+.selection-popup.mobile-fab {
+    left: auto !important;
+    top: auto !important;
+    right: max(0.9rem, env(safe-area-inset-right));
+    bottom: calc(0.9rem + env(safe-area-inset-bottom));
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+}
+
+.selection-popup.mobile-fab .popup-highlight-btn {
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    border-radius: 999px;
+    font-size: 0;
+    box-shadow: var(--shadow-lg);
+}
+
+.selection-popup.mobile-fab .popup-highlight-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
 /* Note Modal */
 .note-modal-overlay {
     position: fixed;
@@ -1168,11 +1222,11 @@ header h1 {
     }
 
     .form-details {
-        flex-direction: row;
+        flex-direction: column;
     }
 
     .form-details select {
-        width: auto;
+        width: 100%;
     }
 
     .filters {

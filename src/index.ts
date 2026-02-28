@@ -70,6 +70,27 @@ function parseTitle(html: string): string | null {
   return null;
 }
 
+function parseAuthor(html: string): string | null {
+  const patterns = [
+    /<meta[^>]*name=["']author["'][^>]*content=["']([^"']+)["']/i,
+    /<meta[^>]*content=["']([^"']+)["'][^>]*name=["']author["']/i,
+    /<meta[^>]*property=["']article:author["'][^>]*content=["']([^"']+)["']/i,
+    /<meta[^>]*content=["']([^"']+)["'][^>]*property=["']article:author["']/i,
+    /<meta[^>]*name=["']twitter:creator["'][^>]*content=["']([^"']+)["']/i,
+    /<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:creator["']/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match && match[1]) {
+      const author = decodeHtmlEntities(match[1].trim()).replace(/^@/, "");
+      if (author) return author;
+    }
+  }
+
+  return null;
+}
+
 function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&amp;/g, "&")
@@ -225,6 +246,7 @@ app.get("/api/fetch-meta", async (c) => {
     const contentType = response.headers.get("content-type") || "";
     const type = detectType(url, contentType);
     let title = null;
+    let author = null;
 
     if (
       contentType.includes("text/html") ||
@@ -232,6 +254,7 @@ app.get("/api/fetch-meta", async (c) => {
     ) {
       const html = await response.text();
       title = parseTitle(html);
+      author = parseAuthor(html);
     }
 
     if (!title) {
@@ -242,7 +265,7 @@ app.get("/api/fetch-meta", async (c) => {
       }
     }
 
-    return c.json({ title, type });
+    return c.json({ title, type, author });
   } catch {
     let fallbackTitle;
     try {
@@ -250,7 +273,11 @@ app.get("/api/fetch-meta", async (c) => {
     } catch {
       fallbackTitle = url;
     }
-    return c.json({ title: fallbackTitle, type: detectType(url) });
+    return c.json({
+      title: fallbackTitle,
+      type: detectType(url),
+      author: null,
+    });
   }
 });
 
@@ -366,6 +393,7 @@ app.post("/api/import/readwise", async (c) => {
   }
 
   const titleIndex = getHeaderIndex(headers, ["title"]);
+  const authorIndex = getHeaderIndex(headers, ["author", "authors", "creator"]);
   const tagsIndex = getHeaderIndex(headers, [
     "document tags",
     "document_tags",
@@ -387,7 +415,7 @@ app.post("/api/import/readwise", async (c) => {
 
   const seen = new Set<string>();
   const insertItem = db.query(
-    "INSERT INTO items (url, title, type, created_at) VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))",
+    "INSERT INTO items (url, title, author, type, created_at) VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))",
   );
   const existingItem = db.query("SELECT id FROM items WHERE url = ?");
   const insertTag = db.query("INSERT OR IGNORE INTO tags (name) VALUES (?)");
@@ -421,6 +449,8 @@ app.post("/api/import/readwise", async (c) => {
         const title =
           (titleIndex !== -1 ? row[titleIndex] : "")?.trim() ||
           fallbackTitle(url);
+        const author =
+          (authorIndex !== -1 ? row[authorIndex] : "")?.trim() || "";
         const tagsRaw = tagsIndex !== -1 ? row[tagsIndex] : "";
         const tags = parseReadwiseTags(tagsRaw);
         const savedRaw = savedIndex !== -1 ? row[savedIndex] : "";
@@ -430,6 +460,7 @@ app.post("/api/import/readwise", async (c) => {
         const result = insertItem.run(
           url,
           title || "",
+          author,
           type || "article",
           createdAt,
         );
@@ -518,13 +549,13 @@ app.get("/api/tags", (c) => {
 });
 
 app.post("/api/items", async (c) => {
-  const { url, title, type, tags } = await c.req.json();
+  const { url, title, author, type, tags } = await c.req.json();
 
   if (!url) return c.json({ error: "URL is required" }, 400);
 
   const result = db
-    .query(`INSERT INTO items (url, title, type) VALUES (?, ?, ?)`)
-    .run(url, title || "", type || "article");
+    .query(`INSERT INTO items (url, title, author, type) VALUES (?, ?, ?, ?)`)
+    .run(url, title || "", author || "", type || "article");
 
   const itemId = result.lastInsertRowid;
 
@@ -578,6 +609,10 @@ app.patch("/api/items/:id", async (c) => {
     db.query("UPDATE items SET title = ? WHERE id = ?").run(body.title, id);
   }
 
+  if (body.author !== undefined) {
+    db.query("UPDATE items SET author = ? WHERE id = ?").run(body.author, id);
+  }
+
   if (body.notes !== undefined) {
     db.query("UPDATE items SET notes = ? WHERE id = ?").run(body.notes, id);
   }
@@ -587,11 +622,11 @@ app.patch("/api/items/:id", async (c) => {
 
 app.put("/api/items/:id", async (c) => {
   const id = c.req.param("id");
-  const { url, title, type, tags, notes } = await c.req.json();
+  const { url, title, author, type, tags, notes } = await c.req.json();
 
   db.query(
-    "UPDATE items SET url = ?, title = ?, type = ?, notes = ? WHERE id = ?",
-  ).run(url, title || "", type || "article", notes || "", id);
+    "UPDATE items SET url = ?, title = ?, author = ?, type = ?, notes = ? WHERE id = ?",
+  ).run(url, title || "", author || "", type || "article", notes || "", id);
 
   db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
 

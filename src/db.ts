@@ -14,6 +14,7 @@ export function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       url TEXT NOT NULL,
       title TEXT NOT NULL DEFAULT '',
+      author TEXT NOT NULL DEFAULT '',
       type TEXT NOT NULL DEFAULT 'article',
       notes TEXT NOT NULL DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -24,6 +25,12 @@ export function initDb() {
   // Add notes column if it doesn't exist (for existing databases)
   try {
     db.run(`ALTER TABLE items ADD COLUMN notes TEXT NOT NULL DEFAULT ''`);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
+
+  try {
+    db.run(`ALTER TABLE items ADD COLUMN author TEXT NOT NULL DEFAULT ''`);
   } catch (e) {
     // Column already exists, ignore error
   }
