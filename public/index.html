@@ -103,8 +103,13 @@
                             type="url"
                             id="url"
                             placeholder="Paste a URL..."
-                            required
                             autocomplete="off"
+                        />
+                        <input
+                            type="file"
+                            id="file-upload-input"
+                            accept=".pdf,.epub,application/pdf,application/epub+zip"
+                            hidden
                         />
                         <button type="submit" id="submit-btn">Add</button>
                     </div>
@@ -125,6 +130,7 @@
                             <option value="article">Article</option>
                             <option value="video">Video</option>
                             <option value="pdf">PDF</option>
+                            <option value="ebook">Ebook</option>
                             <option value="podcast">Podcast</option>
                         </select>
                     </div>
@@ -204,6 +210,13 @@
                                 <label class="dropdown-option" data-value="pdf">
                                     <input type="checkbox" value="pdf" />
                                     PDF
+                                </label>
+                                <label
+                                    class="dropdown-option"
+                                    data-value="ebook"
+                                >
+                                    <input type="checkbox" value="ebook" />
+                                    Ebook
                                 </label>
                                 <label
                                     class="dropdown-option"
@@ -510,6 +523,7 @@
                             <option value="article">Article</option>
                             <option value="video">Video</option>
                             <option value="pdf">PDF</option>
+                            <option value="ebook">Ebook</option>
                             <option value="podcast">Podcast</option>
                         </select>
                     </div>
@@ -538,6 +552,8 @@
             </div>
         </div>
 
+        <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
         <script src="/static/app.js"></script>
     </body>
 </html>

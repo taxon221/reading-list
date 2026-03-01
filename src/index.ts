@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { cors } from "hono/cors";
+import { existsSync, mkdirSync, unlinkSync } from "fs";
+import { basename, extname, join } from "path";
 import { db, initDb } from "./db";
 
 const app = new Hono();
@@ -9,11 +11,20 @@ initDb();
 
 app.use("/*", cors());
 app.use("/static/*", serveStatic({ root: "./public" }));
+app.use("/uploads/*", serveStatic({ root: "./data" }));
 app.get(
   "/manifest.webmanifest",
   serveStatic({ path: "./public/manifest.webmanifest" }),
 );
+app.get("/pdf-reader.html", serveStatic({ path: "./public/pdf-reader.html" }));
 app.get("/", serveStatic({ path: "./public/index.html" }));
+
+const uploadsDir = "./data/uploads";
+if (!existsSync(uploadsDir)) {
+  mkdirSync(uploadsDir, { recursive: true });
+}
+
+const allowedUploadExtensions = new Set(["pdf", "epub"]);
 
 function detectType(url: string, contentType?: string): string {
   const urlLower = url.toLowerCase();
@@ -44,8 +55,13 @@ function detectType(url: string, contentType?: string): string {
     return "pdf";
   }
 
+  if (urlLower.endsWith(".epub")) {
+    return "ebook";
+  }
+
   if (contentType) {
     if (contentType.includes("application/pdf")) return "pdf";
+    if (contentType.includes("application/epub+zip")) return "ebook";
     if (contentType.includes("video/")) return "video";
     if (contentType.includes("audio/")) return "podcast";
   }
@@ -222,6 +238,100 @@ function fallbackTitle(url: string): string {
   } catch {
     return url;
   }
+}
+
+function getFileExtension(name: string): string {
+  return extname(name || "")
+    .toLowerCase()
+    .replace(".", "");
+}
+
+function normalizeFilenameBase(name: string): string {
+  return basename(name, extname(name))
+    .replace(/[_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseTitleAuthorFromFilename(name: string): {
+  title: string;
+  author: string;
+} {
+  const base = normalizeFilenameBase(name);
+  const parts = base
+    .split(/\s+-\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    return {
+      author: parts[0],
+      title: parts.slice(1).join(" - "),
+    };
+  }
+
+  return { title: base, author: "" };
+}
+
+function sanitizeFilenamePart(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60);
+}
+
+function createStoredFilename(originalName: string, extension: string): string {
+  const parsed = parseTitleAuthorFromFilename(originalName);
+  const base = sanitizeFilenamePart(parsed.title || "file") || "file";
+  return `${Date.now()}-${crypto.randomUUID()}-${base}.${extension}`;
+}
+
+function detectUploadedFileType(extension: string): string {
+  return extension === "pdf" ? "pdf" : "ebook";
+}
+
+function parseUploadTags(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((tag) =>
+          String(tag || "")
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean);
+    }
+  } catch {
+    return raw
+      .split(",")
+      .map((tag) => tag.trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function getUploadFilename(url: string): string | null {
+  if (!url.startsWith("/uploads/")) return null;
+  const filename = url.slice("/uploads/".length);
+  if (!/^[a-zA-Z0-9._-]+$/.test(filename)) return null;
+  return filename;
+}
+
+function removeUploadedFileIfExists(url: string) {
+  const filename = getUploadFilename(url);
+  if (!filename) return;
+
+  const filePath = join(uploadsDir, filename);
+  if (!existsSync(filePath)) return;
+
+  try {
+    unlinkSync(filePath);
+  } catch {}
 }
 
 app.get("/api/fetch-meta", async (c) => {
@@ -488,6 +598,116 @@ app.post("/api/import/readwise", async (c) => {
   return c.json({ success: true, imported, duplicate, skipped, errors });
 });
 
+app.post("/api/import/file", async (c) => {
+  const contentType = c.req.header("content-type") || "";
+  if (!contentType.includes("multipart/form-data")) {
+    return c.json({ error: "Multipart form upload required" }, 400);
+  }
+
+  const form = await c.req.formData();
+  const tags = parseUploadTags((form.get("tags") as string) || null);
+  const titleOverride = ((form.get("title") as string) || "").trim();
+  const authorOverride = ((form.get("author") as string) || "").trim();
+
+  const fileEntries = form.getAll("files");
+  const fallbackSingle = form.get("file");
+  const files =
+    fileEntries.length > 0
+      ? fileEntries
+      : fallbackSingle
+        ? [fallbackSingle]
+        : [];
+  const validFiles = files.filter(
+    (entry): entry is File => typeof entry !== "string" && !!entry?.name,
+  );
+
+  if (validFiles.length === 0) {
+    return c.json({ error: "No files provided" }, 400);
+  }
+
+  const insertItem = db.query(
+    "INSERT INTO items (url, title, author, type) VALUES (?, ?, ?, ?)",
+  );
+  const insertTag = db.query("INSERT OR IGNORE INTO tags (name) VALUES (?)");
+  const getTag = db.query("SELECT id FROM tags WHERE name = ?");
+  const insertItemTag = db.query(
+    "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
+  );
+
+  let imported = 0;
+  let skipped = 0;
+  const failedFiles: Array<{ name: string; reason: string }> = [];
+
+  for (const file of validFiles) {
+    let storedUrl = "";
+    try {
+      const extension = getFileExtension(file.name);
+      if (!allowedUploadExtensions.has(extension)) {
+        skipped++;
+        failedFiles.push({
+          name: file.name,
+          reason: `Unsupported file type: .${extension || "unknown"}`,
+        });
+        continue;
+      }
+
+      const parsed = parseTitleAuthorFromFilename(file.name);
+      const title =
+        validFiles.length === 1 && titleOverride
+          ? titleOverride
+          : parsed.title || file.name;
+      const author =
+        validFiles.length === 1 && authorOverride
+          ? authorOverride
+          : parsed.author || "";
+      const storedFilename = createStoredFilename(file.name, extension);
+      storedUrl = `/uploads/${storedFilename}`;
+      const storedPath = join(uploadsDir, storedFilename);
+      const fileBuffer = new Uint8Array(await file.arrayBuffer());
+      await Bun.write(storedPath, fileBuffer);
+
+      const type = detectUploadedFileType(extension);
+      const result = insertItem.run(storedUrl, title, author, type);
+      const itemId = result.lastInsertRowid;
+
+      for (const tagName of tags) {
+        insertTag.run(tagName);
+        const tag = getTag.get(tagName) as { id: number } | undefined;
+        if (tag?.id) {
+          insertItemTag.run(itemId, tag.id);
+        }
+      }
+
+      imported++;
+    } catch (error: any) {
+      if (storedUrl) removeUploadedFileIfExists(storedUrl);
+      skipped++;
+      failedFiles.push({
+        name: file.name,
+        reason: error?.message || "Failed to process file.",
+      });
+    }
+  }
+
+  if (imported === 0) {
+    return c.json(
+      {
+        error: "No supported files uploaded",
+        skipped,
+        failed_files: failedFiles,
+      },
+      400,
+    );
+  }
+
+  return c.json({
+    success: true,
+    imported,
+    skipped,
+    failed_files: failedFiles,
+  });
+});
+
 app.get("/api/items", (c) => {
   const tagsParam = c.req.query("tags");
   const typesParam = c.req.query("types");
@@ -623,10 +843,20 @@ app.patch("/api/items/:id", async (c) => {
 app.put("/api/items/:id", async (c) => {
   const id = c.req.param("id");
   const { url, title, author, type, tags, notes } = await c.req.json();
+  const existingItem = db
+    .query("SELECT url, author FROM items WHERE id = ?")
+    .get(id) as { url: string; author: string } | undefined;
+
+  if (existingItem?.url && existingItem.url !== url) {
+    removeUploadedFileIfExists(existingItem.url);
+  }
+
+  const nextAuthor =
+    author !== undefined ? String(author || "") : existingItem?.author || "";
 
   db.query(
     "UPDATE items SET url = ?, title = ?, author = ?, type = ?, notes = ? WHERE id = ?",
-  ).run(url, title || "", author || "", type || "article", notes || "", id);
+  ).run(url, title || "", nextAuthor, type || "article", notes || "", id);
 
   db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
 
@@ -651,6 +881,14 @@ app.put("/api/items/:id", async (c) => {
 
 app.delete("/api/items/:id", (c) => {
   const id = c.req.param("id");
+  const item = db.query("SELECT url FROM items WHERE id = ?").get(id) as
+    | { url: string }
+    | undefined;
+
+  if (item?.url) {
+    removeUploadedFileIfExists(item.url);
+  }
+
   db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
   db.query("DELETE FROM highlights WHERE item_id = ?").run(id);
   db.query("DELETE FROM items WHERE id = ?").run(id);

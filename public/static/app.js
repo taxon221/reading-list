@@ -11,7 +11,9 @@ let readerIframe = null;
 let currentHighlights = [];
 let pendingSelectionText = "";
 let searchQuery = "";
-let editAuthorValue = "";
+let currentEpubBook = null;
+let currentEpubRendition = null;
+let pendingUploadFile = null;
 
 const form = document.getElementById("add-item-form");
 const urlInput = document.getElementById("url");
@@ -23,6 +25,10 @@ const tagsContainer = document.getElementById("tags-input");
 const submitBtn = document.getElementById("submit-btn");
 const itemsList = document.getElementById("items-list");
 const searchInput = document.getElementById("search-input");
+const fileUploadInput = document.getElementById("file-upload-input");
+const addFormSection = document.querySelector(".add-form");
+const defaultUrlPlaceholder =
+  urlInput?.getAttribute("placeholder") || "Paste a URL...";
 
 const typeDropdown = document.getElementById("type-dropdown");
 const typeFilterBtn = document.getElementById("type-filter-btn");
@@ -122,6 +128,39 @@ if (importBtn && importFile) {
   });
 }
 
+if (fileUploadInput) {
+  fileUploadInput.addEventListener("change", () => {
+    const files = fileUploadInput.files;
+    if (files && files.length > 0) stageSelectedFiles(files);
+  });
+}
+
+function preventDropDefaults(event) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+if (addFormSection) {
+  ["dragenter", "dragover"].forEach((eventName) => {
+    addFormSection.addEventListener(eventName, (event) => {
+      preventDropDefaults(event);
+      addFormSection.classList.add("drag-over");
+    });
+  });
+
+  ["dragleave", "dragend", "drop"].forEach((eventName) => {
+    addFormSection.addEventListener(eventName, (event) => {
+      preventDropDefaults(event);
+      addFormSection.classList.remove("drag-over");
+    });
+  });
+
+  addFormSection.addEventListener("drop", (event) => {
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) stageSelectedFiles(files);
+  });
+}
+
 async function fetchMetadata(url) {
   if (!url || !isValidUrl(url)) return null;
   try {
@@ -131,6 +170,126 @@ async function fetchMetadata(url) {
     return await response.json();
   } catch {
     return null;
+  }
+}
+
+function getSupportedUploadFiles(fileList) {
+  return Array.from(fileList || []).filter((file) =>
+    /\.(pdf|epub)$/i.test(file.name || ""),
+  );
+}
+
+function parseTitleAuthorFromFilename(name) {
+  const base = (name || "")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = base
+    .split(/\s+-\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) {
+    return { author: parts[0], title: parts.slice(1).join(" - ") };
+  }
+  return { title: base, author: "" };
+}
+
+function clearPendingUploadFile() {
+  pendingUploadFile = null;
+  urlInput.placeholder = defaultUrlPlaceholder;
+  if (fileUploadInput) fileUploadInput.value = "";
+}
+
+function stageSelectedFiles(fileList) {
+  const files = getSupportedUploadFiles(fileList);
+  if (files.length === 0) {
+    alert("Please choose a PDF or EPUB file.");
+    return;
+  }
+
+  if (files.length > 1) {
+    alert("Please choose one file at a time.");
+  }
+
+  const file = files[0];
+  pendingUploadFile = file;
+  urlInput.value = "";
+  urlInput.placeholder = `Selected file: ${file.name}`;
+
+  const parsed = parseTitleAuthorFromFilename(file.name);
+  if (!titleInput.value.trim()) titleInput.value = parsed.title || file.name;
+  if (!authorInput.value.trim() && parsed.author)
+    authorInput.value = parsed.author;
+  typeSelect.value = file.name.toLowerCase().endsWith(".pdf") ? "pdf" : "ebook";
+}
+
+async function addPendingUploadFile() {
+  if (!pendingUploadFile) return;
+
+  const originalText = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Adding...";
+
+  try {
+    const formData = new FormData();
+    formData.append("file", pendingUploadFile);
+    formData.append("tags", JSON.stringify(pendingTags));
+    const title = titleInput.value.trim();
+    const author = authorInput.value.trim();
+    if (title) formData.append("title", title);
+    if (author) formData.append("author", author);
+
+    const response = await fetch("/api/import/file", {
+      method: "POST",
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const failed = (data.failed_files || [])
+        .map((entry) => `- ${entry.name}: ${entry.reason}`)
+        .join("\n");
+      const message = [
+        data.error || "File upload failed.",
+        failed ? `\n${failed}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      alert(message);
+      return;
+    }
+
+    if (
+      (data.skipped || 0) > 0 ||
+      (data.failed_files && data.failed_files.length)
+    ) {
+      const failed = (data.failed_files || [])
+        .map((entry) => `- ${entry.name}: ${entry.reason}`)
+        .join("\n");
+      const message = [
+        `Imported ${data.imported || 0} file(s).`,
+        data.skipped ? `Skipped ${data.skipped} file(s).` : "",
+        failed ? `\nDetails:\n${failed}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      alert(message);
+    }
+
+    form.reset();
+    pendingTags = [];
+    renderTagPills(pendingTags, tagsContainer, tagInput);
+    fetchedMeta = null;
+    clearPendingUploadFile();
+    loadItems();
+    loadTags();
+  } catch {
+    alert("File upload failed. Please try again.");
+  } finally {
+    if (fileUploadInput) fileUploadInput.value = "";
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalText || "Add";
   }
 }
 
@@ -149,10 +308,16 @@ urlInput.addEventListener("input", (e) => {
   if (fetchTimeout) clearTimeout(fetchTimeout);
   fetchedMeta = null;
 
+  if (url && pendingUploadFile) {
+    clearPendingUploadFile();
+  }
+
   if (!url || !isValidUrl(url)) {
-    titleInput.value = "";
-    authorInput.value = "";
-    typeSelect.value = "article";
+    if (!pendingUploadFile) {
+      titleInput.value = "";
+      authorInput.value = "";
+      typeSelect.value = "article";
+    }
     return;
   }
 
@@ -213,7 +378,14 @@ setupTagInput(editTagInput, editTags, editTagsContainer);
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const url = urlInput.value.trim();
-  if (!url) return;
+  if (!url) {
+    if (pendingUploadFile) {
+      await addPendingUploadFile();
+      return;
+    }
+    if (fileUploadInput) fileUploadInput.click();
+    return;
+  }
 
   submitBtn.disabled = true;
   submitBtn.textContent = "Adding...";
@@ -245,6 +417,7 @@ form.addEventListener("submit", async (e) => {
       pendingTags = [];
       renderTagPills(pendingTags, tagsContainer, tagInput);
       fetchedMeta = null;
+      clearPendingUploadFile();
       loadItems();
       loadTags();
     }
@@ -609,7 +782,148 @@ document.addEventListener("click", (e) => {
 });
 
 // Reader view functions
+function resetEpubReader() {
+  try {
+    if (
+      currentEpubRendition &&
+      typeof currentEpubRendition.destroy === "function"
+    ) {
+      currentEpubRendition.destroy();
+    }
+  } catch {}
+
+  try {
+    if (currentEpubBook && typeof currentEpubBook.destroy === "function") {
+      currentEpubBook.destroy();
+    }
+  } catch {}
+
+  currentEpubRendition = null;
+  currentEpubBook = null;
+}
+
+async function withTimeout(promise, ms, message) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function openEpubReader(url) {
+  const epubFactory = window.ePub;
+  if (typeof epubFactory !== "function") {
+    showReaderError(url, "EPUB reader failed to load.");
+    return;
+  }
+  if (typeof window.JSZip !== "function") {
+    showReaderError(url, "JSZip is not loaded. EPUB reading is unavailable.");
+    return;
+  }
+
+  readerContent.innerHTML = `
+    <div class="ebook-reader">
+      <div class="ebook-toolbar">
+        <button type="button" class="ebook-nav-btn" id="ebook-prev">Prev</button>
+        <span class="ebook-location" id="ebook-location">Loading...</span>
+        <button type="button" class="ebook-nav-btn" id="ebook-next">Next</button>
+      </div>
+      <div class="ebook-stage" id="ebook-stage"></div>
+    </div>
+  `;
+
+  const stage = document.getElementById("ebook-stage");
+  const locationEl = document.getElementById("ebook-location");
+  const prevBtn = document.getElementById("ebook-prev");
+  const nextBtn = document.getElementById("ebook-next");
+  if (!stage || !locationEl || !prevBtn || !nextBtn) {
+    showReaderError(url, "Failed to initialize EPUB reader.");
+    return;
+  }
+
+  const attachSelectionToCurrentChapter = () => {
+    const iframe = stage.querySelector("iframe");
+    if (!iframe) return;
+    readerIframe = iframe;
+    setupIframeSelectionListener();
+    applyHighlightsToDocument();
+  };
+
+  try {
+    const fileResponse = await withTimeout(
+      fetch(url),
+      15000,
+      "Timed out loading EPUB file.",
+    );
+    if (!fileResponse.ok) {
+      throw new Error("Failed to load EPUB file.");
+    }
+
+    const fileBuffer = await withTimeout(
+      fileResponse.arrayBuffer(),
+      15000,
+      "Timed out reading EPUB file.",
+    );
+
+    const header = new Uint8Array(fileBuffer.slice(0, 4));
+    const isZip = header[0] === 0x50 && header[1] === 0x4b;
+    if (!isZip) {
+      throw new Error("The uploaded file is not a valid EPUB archive.");
+    }
+
+    const book = epubFactory(fileBuffer);
+    const rendition = book.renderTo(stage, {
+      width: "100%",
+      height: "100%",
+      spread: "none",
+    });
+
+    currentEpubBook = book;
+    currentEpubRendition = rendition;
+
+    prevBtn.addEventListener("click", () => rendition.prev());
+    nextBtn.addEventListener("click", () => rendition.next());
+
+    rendition.on("rendered", () => {
+      setTimeout(attachSelectionToCurrentChapter, 30);
+    });
+
+    rendition.on("relocated", (location) => {
+      const percentage = location?.start?.percentage;
+      if (typeof percentage === "number") {
+        locationEl.textContent = `${Math.round(percentage * 100)}%`;
+      } else {
+        locationEl.textContent = "";
+      }
+    });
+
+    await withTimeout(book.ready, 12000, "EPUB parsing timed out.");
+    await withTimeout(rendition.display(), 12000, "EPUB render timed out.");
+    attachSelectionToCurrentChapter();
+
+    setTimeout(() => {
+      if (!stage.querySelector("iframe")) {
+        showReaderError(url, "Failed to render EPUB content.");
+      }
+    }, 1500);
+  } catch (error) {
+    resetEpubReader();
+    const message =
+      error && typeof error.message === "string" && error.message
+        ? error.message
+        : "Failed to render EPUB. Make sure the file is valid.";
+    showReaderError(url, message);
+  }
+}
+
 async function openReader(id, url, title, type) {
+  resetEpubReader();
   currentReaderId = id;
   readerIframe = null;
   currentHighlights = [];
@@ -617,10 +931,8 @@ async function openReader(id, url, title, type) {
   readerTitle.textContent = title;
   readerOpenOriginal.href = url;
 
-  // Load highlights for this item
   await loadHighlights(id);
 
-  // Show loading state
   readerContent.innerHTML = `
     <div class="reader-loading">
       <div class="reader-spinner"></div>
@@ -628,7 +940,6 @@ async function openReader(id, url, title, type) {
     </div>
   `;
 
-  // Handle different content types
   if (type === "video") {
     const youtubeMatch = url.match(
       /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?]+)/,
@@ -645,11 +956,31 @@ async function openReader(id, url, title, type) {
   }
 
   if (type === "pdf" || url.toLowerCase().endsWith(".pdf")) {
-    readerContent.innerHTML = `<iframe src="${url}"></iframe>`;
+    if (!url.startsWith("/uploads/")) {
+      readerContent.innerHTML = `<iframe src="${url}"></iframe>`;
+      return;
+    }
+
+    const iframe = document.createElement("iframe");
+    iframe.src = `/pdf-reader.html?file=${encodeURIComponent(url)}`;
+    readerContent.innerHTML = "";
+    readerContent.appendChild(iframe);
+    readerIframe = iframe;
+
+    iframe.onload = () => {
+      setupIframeSelectionListener();
+      applyHighlightsToDocument();
+      setTimeout(applyHighlightsToDocument, 500);
+      setTimeout(applyHighlightsToDocument, 1400);
+    };
     return;
   }
 
-  // For articles and other content, use the proxy
+  if (type === "ebook" || /\.epub$/i.test(url)) {
+    await openEpubReader(url);
+    return;
+  }
+
   try {
     const response = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
     const data = await response.json();
@@ -671,13 +1002,11 @@ async function openReader(id, url, title, type) {
       doc.write(data.content);
       doc.close();
 
-      // Wait for content to load, then apply highlights and setup selection
       iframe.onload = () => {
         applyHighlightsToDocument();
         setupIframeSelectionListener();
       };
 
-      // Also try immediately in case onload already fired
       setTimeout(() => {
         applyHighlightsToDocument();
         setupIframeSelectionListener();
@@ -713,6 +1042,7 @@ function showReaderError(url, message) {
 }
 
 function closeReader() {
+  resetEpubReader();
   readerModal.style.display = "none";
   readerContent.innerHTML = "";
   currentReaderId = null;
@@ -773,29 +1103,41 @@ function renderSidebarHighlights() {
 }
 
 function applyHighlightsToDocument() {
-  if (!readerIframe || currentHighlights.length === 0) return;
+  if (!readerIframe) return;
 
   try {
     const doc =
       readerIframe.contentDocument || readerIframe.contentWindow.document;
     if (!doc || !doc.body) return;
 
-    // Add highlight styles
-    const style = doc.createElement("style");
-    style.textContent = `
-      .reading-list-highlight {
-        background-color: rgba(59, 130, 246, 0.3);
-        border-radius: 2px;
-        padding: 0 2px;
-        margin: 0 -2px;
-      }
-      .reading-list-highlight:hover {
-        background-color: rgba(59, 130, 246, 0.5);
-      }
-    `;
-    doc.head.appendChild(style);
+    if (!doc.getElementById("reading-list-highlight-style")) {
+      const style = doc.createElement("style");
+      style.id = "reading-list-highlight-style";
+      style.textContent = `
+        .reading-list-highlight {
+          background-color: rgba(59, 130, 246, 0.3);
+          border-radius: 2px;
+          padding: 0 2px;
+          margin: 0 -2px;
+        }
+        .reading-list-highlight:hover {
+          background-color: rgba(59, 130, 246, 0.5);
+        }
+      `;
+      doc.head.appendChild(style);
+    }
 
-    // Apply each highlight
+    doc.querySelectorAll(".reading-list-highlight").forEach((el) => {
+      const parent = el.parentNode;
+      if (!parent) return;
+      while (el.firstChild) {
+        parent.insertBefore(el.firstChild, el);
+      }
+      parent.removeChild(el);
+    });
+
+    if (currentHighlights.length === 0) return;
+
     currentHighlights.forEach((highlight) => {
       highlightTextInDocument(doc, highlight.selected_text);
     });
@@ -814,15 +1156,12 @@ function highlightTextInDocument(doc, text) {
 
   const nodesToHighlight = [];
   let node;
-
-  // Normalize the search text
   const normalizedSearchText = text.replace(/\s+/g, " ").trim();
 
   while ((node = walker.nextNode())) {
     const nodeText = node.textContent;
     const normalizedNodeText = nodeText.replace(/\s+/g, " ");
 
-    // Check if this node contains part of our text
     if (
       normalizedSearchText.includes(normalizedNodeText.trim()) ||
       normalizedNodeText.includes(normalizedSearchText)
@@ -838,7 +1177,6 @@ function highlightTextInDocument(doc, text) {
     }
   }
 
-  // Apply highlights (in reverse to not mess up indices)
   nodesToHighlight.reverse().forEach(({ node, index, length }) => {
     try {
       const range = doc.createRange();
@@ -848,9 +1186,7 @@ function highlightTextInDocument(doc, text) {
       const span = doc.createElement("span");
       span.className = "reading-list-highlight";
       range.surroundContents(span);
-    } catch (e) {
-      // Range might be invalid, skip this highlight
-    }
+    } catch (e) {}
   });
 }
 
@@ -890,6 +1226,9 @@ function setupIframeSelectionListener() {
   try {
     const doc =
       readerIframe.contentDocument || readerIframe.contentWindow.document;
+    if (!doc || !doc.documentElement) return;
+    if (doc.documentElement.dataset.rlSelectionBound === "1") return;
+    doc.documentElement.dataset.rlSelectionBound = "1";
 
     doc.addEventListener("mouseup", handleIframeSelection);
     doc.addEventListener("touchend", handleIframeSelection);
@@ -1054,26 +1393,7 @@ async function deleteHighlight(highlightId) {
     await fetch(`/api/highlights/${highlightId}`, { method: "DELETE" });
     currentHighlights = currentHighlights.filter((h) => h.id !== highlightId);
     renderSidebarHighlights();
-
-    // Remove highlight from document
-    if (readerIframe) {
-      try {
-        const doc =
-          readerIframe.contentDocument || readerIframe.contentWindow.document;
-        const highlights = doc.querySelectorAll(".reading-list-highlight");
-        highlights.forEach((el) => {
-          const parent = el.parentNode;
-          while (el.firstChild) {
-            parent.insertBefore(el.firstChild, el);
-          }
-          parent.removeChild(el);
-        });
-        // Re-apply remaining highlights
-        applyHighlightsToDocument();
-      } catch (e) {
-        // Ignore errors
-      }
-    }
+    applyHighlightsToDocument();
   } catch (error) {
     console.error("Failed to delete highlight:", error);
   }
@@ -1202,7 +1522,6 @@ async function deleteItem(id) {
 async function openEditModal(id) {
   const response = await fetch(`/api/items/${id}`);
   const item = await response.json();
-  editAuthorValue = item.author || "";
   editIdInput.value = item.id;
   editUrlInput.value = item.url;
   editTitleInput.value = item.title || "";
@@ -1215,7 +1534,6 @@ async function openEditModal(id) {
 function closeEditModal() {
   editModal.style.display = "none";
   editForm.reset();
-  editAuthorValue = "";
   editTags = [];
   renderTagPills(editTags, editTagsContainer, editTagInput);
 }
@@ -1231,7 +1549,6 @@ editForm.addEventListener("submit", async (e) => {
   const payload = {
     url: editUrlInput.value.trim(),
     title: editTitleInput.value.trim(),
-    author: editAuthorValue,
     type: editTypeSelect.value,
     tags: editTags,
   };
