@@ -14,6 +14,15 @@ let searchQuery = "";
 let currentEpubBook = null;
 let currentEpubRendition = null;
 let pendingUploadFile = null;
+let itemsById = new Map();
+let pendingProgressSave = null;
+let pendingProgressItemId = null;
+let pendingProgressPayload = null;
+let pendingMobileSelectionCheck = null;
+let lockedBodyScrollY = 0;
+let articleProgressPoll = null;
+let mobileSelectionPoll = null;
+let mobilePopupDismissTimer = null;
 
 const form = document.getElementById("add-item-form");
 const urlInput = document.getElementById("url");
@@ -64,6 +73,10 @@ const readerClose = document.getElementById("reader-close");
 const readerOpenOriginal = document.getElementById("reader-open-original");
 const readerSidebar = document.getElementById("reader-sidebar");
 const readerToggleNotes = document.getElementById("reader-toggle-notes");
+const readerThemeToggle = document.getElementById("reader-theme-toggle");
+const readerProgress = document.getElementById("reader-progress");
+const readerProgressFill = document.getElementById("reader-progress-fill");
+const readerProgressLabel = document.getElementById("reader-progress-label");
 const sidebarHighlights = document.getElementById("sidebar-highlights");
 const highlightsCount = document.getElementById("highlights-count");
 
@@ -127,6 +140,21 @@ if (importBtn && importFile) {
     }
   });
 }
+
+window.addEventListener("message", (event) => {
+  if (!readerIframe) return;
+  const data = event.data;
+  if (!data || data.type !== "reading-progress") return;
+
+  if (data.kind === "pdf" && typeof data.ratio === "number") {
+    const ratio = clampProgressRatio(data.ratio);
+    setReaderProgress(true, ratio, `${Math.round(ratio * 100)}%`);
+    queueReaderProgressSave({
+      kind: "pdf",
+      ratio,
+    });
+  }
+});
 
 if (fileUploadInput) {
   fileUploadInput.addEventListener("change", () => {
@@ -496,6 +524,482 @@ function applySearch(items) {
   });
 }
 
+function parseReadingProgress(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  if (typeof raw === "object" || typeof raw === "number") return raw;
+  if (typeof raw !== "string") return null;
+
+  let value = raw.trim();
+  if (!value) return null;
+
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (typeof value === "object" || typeof value === "number") return value;
+    if (typeof value !== "string") return null;
+
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    try {
+      value = JSON.parse(trimmed);
+      continue;
+    } catch {}
+
+    try {
+      const decoded = decodeURIComponent(trimmed);
+      if (decoded !== trimmed) {
+        value = JSON.parse(decoded);
+        continue;
+      }
+    } catch {}
+
+    const numeric = Number.parseFloat(trimmed.replace("%", ""));
+    if (Number.isFinite(numeric)) return numeric;
+    return null;
+  }
+
+  return typeof value === "object" || typeof value === "number"
+    ? value
+    : null;
+}
+
+function clampProgressRatio(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function getItemProgressInfo(item) {
+  if (!item || item.type === "video" || item.type === "podcast") return null;
+
+  const progress = parseReadingProgress(item.reading_progress);
+  if (!progress || typeof progress !== "object") {
+    return { ratio: 0, label: "0%" };
+  }
+
+  if (progress.kind === "epub") {
+    if (
+      typeof progress.page === "number" &&
+      typeof progress.total === "number" &&
+      progress.total > 0
+    ) {
+      const ratio = clampProgressRatio(progress.page / progress.total);
+      return { ratio, label: `${progress.page}/${progress.total}` };
+    }
+    const ratio = clampProgressRatio(progress.percentage);
+    return { ratio, label: `${Math.round(ratio * 100)}%` };
+  }
+
+  if (progress.kind === "article" || progress.kind === "pdf") {
+    const ratio = clampProgressRatio(progress.ratio);
+    return { ratio, label: `${Math.round(ratio * 100)}%` };
+  }
+
+  return { ratio: 0, label: "0%" };
+}
+
+function renderItemProgressMeta(item) {
+  const info = getItemProgressInfo(item);
+  if (!info) return "";
+  return `
+    <div class="item-progress-stack" title="Reading progress">
+      <span class="item-progress-label">${escapeHtml(info.label)}</span>
+      <span class="item-progress-bar"><span class="item-progress-fill" style="width: ${Math.round(info.ratio * 100)}%"></span></span>
+    </div>
+  `;
+}
+
+function setReaderProgress(visible, ratio = 0, label = "0%") {
+  if (!readerProgress || !readerProgressFill || !readerProgressLabel) return;
+  if (!visible) {
+    readerProgress.style.display = "none";
+    return;
+  }
+
+  const clampedRatio = clampProgressRatio(ratio);
+  readerProgress.style.display = "flex";
+  readerProgressFill.style.width = `${Math.round(clampedRatio * 100)}%`;
+  readerProgressLabel.textContent =
+    label || `${Math.round(clampedRatio * 100)}%`;
+}
+
+function lockBackgroundScroll() {
+  if (document.body.dataset.readerScrollLocked === "1") return;
+  lockedBodyScrollY =
+    window.scrollY ||
+    window.pageYOffset ||
+    document.documentElement.scrollTop ||
+    0;
+  document.body.dataset.readerScrollLocked = "1";
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${lockedBodyScrollY}px`;
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+  document.body.style.width = "100%";
+  document.body.style.overflow = "hidden";
+}
+
+function unlockBackgroundScroll() {
+  if (document.body.dataset.readerScrollLocked !== "1") return;
+  document.body.dataset.readerScrollLocked = "";
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.right = "";
+  document.body.style.width = "";
+  document.body.style.overflow = "";
+  window.scrollTo(0, lockedBodyScrollY);
+}
+
+function stopArticleProgressPoll() {
+  if (!articleProgressPoll) return;
+  clearInterval(articleProgressPoll);
+  articleProgressPoll = null;
+}
+
+function stopMobileSelectionPoll() {
+  if (!mobileSelectionPoll) return;
+  clearInterval(mobileSelectionPoll);
+  mobileSelectionPoll = null;
+}
+
+function getCurrentItemReadingProgress(itemId) {
+  const item = itemsById.get(Number(itemId));
+  return parseReadingProgress(item?.reading_progress);
+}
+
+function updateCachedItemProgress(itemId, progress) {
+  const numericId = Number(itemId);
+  const item = itemsById.get(numericId);
+  if (!item) return;
+  item.reading_progress = JSON.stringify(progress || {});
+  itemsById.set(numericId, item);
+}
+
+async function persistReaderProgress(itemId, progress) {
+  if (!itemId || !progress || typeof progress !== "object") return;
+  try {
+    await fetch(`/api/items/${itemId}/progress`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ progress }),
+    });
+    updateCachedItemProgress(itemId, progress);
+  } catch {}
+}
+
+function queueReaderProgressSave(progress) {
+  if (!currentReaderId || !progress || typeof progress !== "object") return;
+  if (pendingProgressSave) clearTimeout(pendingProgressSave);
+  pendingProgressItemId = currentReaderId;
+  pendingProgressPayload = progress;
+  updateCachedItemProgress(currentReaderId, progress);
+
+  pendingProgressSave = setTimeout(() => {
+    const itemId = pendingProgressItemId;
+    const payload = pendingProgressPayload;
+    pendingProgressSave = null;
+    pendingProgressItemId = null;
+    pendingProgressPayload = null;
+    persistReaderProgress(itemId, payload);
+  }, 350);
+}
+
+function setupArticleProgressTracking(url) {
+  if (!currentReaderId || !readerIframe) return;
+
+  try {
+    const doc =
+      readerIframe.contentDocument || readerIframe.contentWindow.document;
+    if (!doc || !doc.documentElement) return;
+
+    const win = doc.defaultView;
+    const docEl = doc.documentElement;
+    if (!win || !docEl) return;
+    if (docEl.dataset.rlArticleProgressBound === "1") return;
+
+    stopArticleProgressPoll();
+    docEl.dataset.rlArticleProgressBound = "1";
+    let migratedLegacyArticleProgress = false;
+    let hasCapturedPositiveRatio = false;
+    let hasRestoredNonZeroRatio = false;
+
+    let scrollContainers = [];
+    const getScrollRoot = () => doc.scrollingElement || docEl || doc.body;
+    const getViewportHeight = (scrollRoot) => {
+      const rootClientHeight =
+        scrollRoot && scrollRoot !== doc.body
+          ? Number(scrollRoot.clientHeight) || 0
+          : 0;
+      return Math.max(
+        1,
+        rootClientHeight,
+        Number(win.innerHeight) || 0,
+        Number(docEl.clientHeight) || 0,
+      );
+    };
+    const normalizeProgressUrl = (value) => {
+      if (typeof value !== "string" || !value.trim()) return "";
+      try {
+        const parsed = new URL(value, window.location.origin);
+        const pathname = (parsed.pathname || "/").replace(/\/+$/, "") || "/";
+        return `${parsed.protocol}//${parsed.host}${pathname}`;
+      } catch {
+        return value
+          .trim()
+          .replace(/[?#].*$/, "")
+          .replace(/\/+$/, "")
+          .toLowerCase();
+      }
+    };
+    const currentProgressUrl = normalizeProgressUrl(url);
+    const parseRatioValue = (value, treatAsPercent = false) => {
+      let numeric = null;
+      if (typeof value === "number") {
+        numeric = value;
+      } else if (typeof value === "string") {
+        const cleaned = value.trim();
+        if (!cleaned) return null;
+        const parsed = Number.parseFloat(cleaned.replace("%", ""));
+        if (Number.isFinite(parsed)) {
+          numeric = parsed;
+          if (cleaned.includes("%")) treatAsPercent = true;
+        }
+      }
+      if (numeric === null || Number.isNaN(numeric)) return null;
+      if (treatAsPercent || numeric > 1) numeric /= 100;
+      return clampProgressRatio(numeric);
+    };
+    const getLegacyAwareArticleRatio = (progress) => {
+      if (progress == null) return null;
+
+      if (typeof progress === "number" || typeof progress === "string") {
+        const ratio = parseRatioValue(progress, false);
+        return ratio === null ? null : { ratio, shouldMigrateUrl: false };
+      }
+      if (typeof progress !== "object") return null;
+      if (progress.kind && progress.kind !== "article") return null;
+
+      const ratioCandidates = [
+        parseRatioValue(progress.ratio, false),
+        parseRatioValue(progress.progress, false),
+        parseRatioValue(progress.percentage, true),
+        parseRatioValue(progress.percent, true),
+      ].filter((value) => typeof value === "number");
+      if (ratioCandidates.length === 0) return null;
+      const ratio = ratioCandidates[0];
+
+      const savedUrl = normalizeProgressUrl(
+        progress.url || progress.source_url || progress.article_url,
+      );
+      const sameUrl =
+        !savedUrl || !currentProgressUrl || savedUrl === currentProgressUrl;
+      if (sameUrl || ratio >= 0.99) {
+        return { ratio, shouldMigrateUrl: !sameUrl };
+      }
+      return null;
+    };
+
+    const getElementRatio = (el) => {
+      if (!el || el.nodeType !== 1) return 0;
+      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (maxScroll <= 0) return 0;
+      return clampProgressRatio((Number(el.scrollTop) || 0) / maxScroll);
+    };
+
+    const refreshScrollContainers = () => {
+      if (!doc.body) {
+        scrollContainers = [];
+        return;
+      }
+      const ranked = Array.from(doc.body.querySelectorAll("*"))
+        .map((node) => ({
+          node,
+          maxScroll: Math.max(0, node.scrollHeight - node.clientHeight),
+        }))
+        .filter((entry) => entry.maxScroll > 100)
+        .sort((a, b) => b.maxScroll - a.maxScroll);
+      scrollContainers = ranked.slice(0, 120).map((entry) => entry.node);
+    };
+
+    const getRootRatio = () => {
+      const scrollRoot = getScrollRoot();
+      const docHeight = Math.max(
+        Number(scrollRoot?.scrollHeight) || 0,
+        Number(docEl.scrollHeight) || 0,
+        Number(doc.body?.scrollHeight) || 0,
+      );
+      const viewportHeight = getViewportHeight(scrollRoot);
+      const maxScroll = Math.max(0, docHeight - viewportHeight);
+      if (maxScroll <= 0) return 0;
+      const top = Math.max(
+        Number(scrollRoot?.scrollTop) || 0,
+        Number(docEl.scrollTop) || 0,
+        Number(doc.body?.scrollTop) || 0,
+        Number(win.scrollY) || 0,
+        Number(win.pageYOffset) || 0,
+      );
+      return clampProgressRatio(top / maxScroll);
+    };
+
+    const getContainerRatio = (eventTarget) => {
+      let best = 0;
+      let node =
+        eventTarget && eventTarget.nodeType === 3
+          ? eventTarget.parentElement
+          : eventTarget;
+      while (
+        node &&
+        node.nodeType === 1 &&
+        node !== doc.body &&
+        node !== docEl
+      ) {
+        best = Math.max(best, getElementRatio(node));
+        node = node.parentElement;
+      }
+      for (const container of scrollContainers) {
+        best = Math.max(best, getElementRatio(container));
+      }
+      return best;
+    };
+
+    const getCurrentRatio = (eventTarget) =>
+      Math.max(getRootRatio(), getContainerRatio(eventTarget));
+
+    let restoreGuardUntil = 0;
+    let restoredRatio = 0;
+    let userScrolledAfterRestore = false;
+    let userInteractedAfterRestore = false;
+
+    const saveRatio = (ratio) => {
+      const clampedRatio = clampProgressRatio(ratio);
+      if (clampedRatio > 0) hasCapturedPositiveRatio = true;
+      setReaderProgress(true, clampedRatio, `${Math.round(clampedRatio * 100)}%`);
+      if (
+        clampedRatio <= 0 &&
+        !hasCapturedPositiveRatio &&
+        !hasRestoredNonZeroRatio
+      ) {
+        return;
+      }
+      queueReaderProgressSave({ kind: "article", url, ratio: clampedRatio });
+    };
+
+    const persistRatio = (event) => {
+      if (Date.now() < restoreGuardUntil) return;
+      const measured = getCurrentRatio(event?.target || null);
+      const ratio =
+        !userScrolledAfterRestore && measured < restoredRatio
+          ? restoredRatio
+          : measured;
+      saveRatio(ratio);
+    };
+
+    const restoreProgress = (withGuard = false) => {
+      const progress = getCurrentItemReadingProgress(currentReaderId);
+      const resolved = getLegacyAwareArticleRatio(progress);
+      if (!resolved) {
+        setReaderProgress(true, 0, "0%");
+        return;
+      }
+
+      const ratio = resolved.ratio;
+      restoredRatio = ratio;
+      if (ratio > 0) hasRestoredNonZeroRatio = true;
+      if (withGuard && ratio > 0) {
+        userScrolledAfterRestore = false;
+        userInteractedAfterRestore = false;
+        restoreGuardUntil = Date.now() + 1700;
+      }
+      if (resolved.shouldMigrateUrl && !migratedLegacyArticleProgress) {
+        migratedLegacyArticleProgress = true;
+        queueReaderProgressSave({ kind: "article", url, ratio });
+      }
+
+      const scrollRoot = getScrollRoot();
+      const viewportHeight = getViewportHeight(scrollRoot);
+      const maxDocScroll = Math.max(
+        0,
+        Math.max(
+          Number(scrollRoot?.scrollHeight) || 0,
+          Number(docEl.scrollHeight) || 0,
+          Number(doc.body?.scrollHeight) || 0,
+        ) - viewportHeight,
+      );
+      const docTarget = maxDocScroll * ratio;
+      win.scrollTo(0, docTarget);
+      if (scrollRoot) scrollRoot.scrollTop = docTarget;
+      docEl.scrollTop = docTarget;
+      if (doc.body) doc.body.scrollTop = docTarget;
+
+      const primary = scrollContainers[0];
+      if (primary) {
+        const maxScroll = Math.max(
+          0,
+          primary.scrollHeight - primary.clientHeight,
+        );
+        primary.scrollTop = maxScroll * ratio;
+      }
+
+      saveRatio(ratio);
+    };
+
+    const onScroll = (event) => {
+      if (Date.now() >= restoreGuardUntil && userInteractedAfterRestore) {
+        userScrolledAfterRestore = true;
+      }
+      persistRatio(event);
+    };
+
+    const markUserInteraction = () => {
+      userInteractedAfterRestore = true;
+    };
+
+    refreshScrollContainers();
+    doc.addEventListener("touchstart", markUserInteraction, {
+      passive: true,
+      capture: true,
+    });
+    doc.addEventListener("touchmove", markUserInteraction, {
+      passive: true,
+      capture: true,
+    });
+    doc.addEventListener("wheel", markUserInteraction, {
+      passive: true,
+      capture: true,
+    });
+    doc.addEventListener("pointerdown", markUserInteraction, {
+      passive: true,
+      capture: true,
+    });
+    doc.addEventListener("keydown", markUserInteraction, true);
+    doc.addEventListener("scroll", onScroll, { passive: true, capture: true });
+    win.addEventListener("scroll", onScroll, { passive: true });
+    restoreProgress(true);
+
+    let tick = 0;
+    articleProgressPoll = setInterval(() => {
+      if (!currentReaderId || !readerIframe) {
+        stopArticleProgressPoll();
+        return;
+      }
+      tick += 1;
+      if (tick % 10 === 0) refreshScrollContainers();
+      persistRatio();
+    }, 200);
+
+    setTimeout(refreshScrollContainers, 350);
+    setTimeout(() => restoreProgress(false), 320);
+    setTimeout(() => persistRatio(), 1300);
+  } catch {
+    try {
+      const doc =
+        readerIframe?.contentDocument || readerIframe?.contentWindow?.document;
+      if (doc?.documentElement) {
+        doc.documentElement.dataset.rlArticleProgressBound = "";
+      }
+    } catch {}
+  }
+}
+
 async function loadItems() {
   const params = new URLSearchParams();
   if (selectedTags.length > 0) params.set("tags", selectedTags.join(","));
@@ -503,6 +1007,7 @@ async function loadItems() {
   const url = `/api/items${params.toString() ? "?" + params.toString() : ""}`;
   const response = await fetch(url);
   const items = await response.json();
+  itemsById = new Map(items.map((item) => [Number(item.id), item]));
   renderItems(applySearch(items));
 }
 
@@ -531,6 +1036,7 @@ function renderItems(items) {
         <div class="item-col-left">
           <span class="item-type type-${item.type}">${item.type}</span>
           <span class="item-date">${formatDate(item.created_at)}</span>
+          ${renderItemProgressMeta(item)}
         </div>
         <div class="item-col-right">
           <span class="item-title" onclick="openReader(${item.id}, '${escapeHtml(item.url).replace(/'/g, "\\'")}', '${escapeHtml(item.title || item.url).replace(/'/g, "\\'")}', '${item.type}')">
@@ -834,7 +1340,11 @@ async function openEpubReader(url) {
         <span class="ebook-location" id="ebook-location">Loading...</span>
         <button type="button" class="ebook-nav-btn" id="ebook-next">Next</button>
       </div>
-      <div class="ebook-stage" id="ebook-stage"></div>
+      <div class="ebook-stage">
+        <div class="ebook-stage-frame" id="ebook-stage"></div>
+        <button type="button" class="ebook-tap-zone left" id="ebook-zone-prev" aria-label="Previous page"></button>
+        <button type="button" class="ebook-tap-zone right" id="ebook-zone-next" aria-label="Next page"></button>
+      </div>
     </div>
   `;
 
@@ -842,7 +1352,9 @@ async function openEpubReader(url) {
   const locationEl = document.getElementById("ebook-location");
   const prevBtn = document.getElementById("ebook-prev");
   const nextBtn = document.getElementById("ebook-next");
-  if (!stage || !locationEl || !prevBtn || !nextBtn) {
+  const prevZone = document.getElementById("ebook-zone-prev");
+  const nextZone = document.getElementById("ebook-zone-next");
+  if (!stage || !locationEl || !prevBtn || !nextBtn || !prevZone || !nextZone) {
     showReaderError(url, "Failed to initialize EPUB reader.");
     return;
   }
@@ -853,6 +1365,91 @@ async function openEpubReader(url) {
     readerIframe = iframe;
     setupIframeSelectionListener();
     applyHighlightsToDocument();
+  };
+
+  const setupMobileDoubleTapZones = (rendition) => {
+    if (!isMobileViewport()) return;
+
+    const makeHandler = (callback) => {
+      let lastTapAt = 0;
+      return (event) => {
+        event.preventDefault();
+        const now = Date.now();
+        if (now - lastTapAt <= 320) {
+          lastTapAt = 0;
+          hideSelectionPopup();
+          callback();
+          return;
+        }
+        lastTapAt = now;
+      };
+    };
+
+    const onPrev = makeHandler(() => rendition.prev());
+    const onNext = makeHandler(() => rendition.next());
+
+    prevZone.addEventListener("touchend", onPrev, { passive: false });
+    nextZone.addEventListener("touchend", onNext, { passive: false });
+  };
+
+  const updateEpubLocation = (location, book) => {
+    const cfi = location?.start?.cfi || "";
+    const directPercentage = location?.start?.percentage;
+    if (typeof directPercentage === "number") {
+      const ratio = clampProgressRatio(directPercentage);
+      const label = `${Math.round(ratio * 100)}%`;
+      locationEl.textContent = label;
+      return {
+        payload: { kind: "epub", cfi, percentage: ratio },
+        ratio,
+        label,
+      };
+    }
+
+    const displayed = location?.start?.displayed;
+    if (
+      displayed &&
+      typeof displayed.page === "number" &&
+      typeof displayed.total === "number" &&
+      displayed.total > 0
+    ) {
+      const ratio = clampProgressRatio(displayed.page / displayed.total);
+      const label = `${displayed.page}/${displayed.total}`;
+      locationEl.textContent = label;
+      return {
+        payload: {
+          kind: "epub",
+          cfi,
+          page: displayed.page,
+          total: displayed.total,
+        },
+        ratio,
+        label,
+      };
+    }
+
+    if (cfi) {
+      try {
+        const percentage = book.locations.percentageFromCfi(cfi);
+        if (typeof percentage === "number" && !Number.isNaN(percentage)) {
+          const ratio = clampProgressRatio(percentage);
+          const label = `${Math.round(ratio * 100)}%`;
+          locationEl.textContent = label;
+          return {
+            payload: { kind: "epub", cfi, percentage: ratio },
+            ratio,
+            label,
+          };
+        }
+      } catch {}
+    }
+
+    locationEl.textContent = "";
+    return {
+      payload: cfi ? { kind: "epub", cfi } : { kind: "epub" },
+      ratio: 0,
+      label: "0%",
+    };
   };
 
   try {
@@ -889,23 +1486,52 @@ async function openEpubReader(url) {
 
     prevBtn.addEventListener("click", () => rendition.prev());
     nextBtn.addEventListener("click", () => rendition.next());
+    setupMobileDoubleTapZones(rendition);
 
     rendition.on("rendered", () => {
       setTimeout(attachSelectionToCurrentChapter, 30);
     });
 
     rendition.on("relocated", (location) => {
-      const percentage = location?.start?.percentage;
-      if (typeof percentage === "number") {
-        locationEl.textContent = `${Math.round(percentage * 100)}%`;
-      } else {
-        locationEl.textContent = "";
-      }
+      const progress = updateEpubLocation(location, book);
+      setReaderProgress(true, progress.ratio, progress.label);
+      queueReaderProgressSave(progress.payload);
     });
 
     await withTimeout(book.ready, 12000, "EPUB parsing timed out.");
-    await withTimeout(rendition.display(), 12000, "EPUB render timed out.");
+    try {
+      await withTimeout(
+        book.locations.generate(1000),
+        12000,
+        "EPUB progress indexing timed out.",
+      );
+    } catch {}
+    const savedProgress = getCurrentItemReadingProgress(currentReaderId);
+    const savedCfi =
+      savedProgress && savedProgress.kind === "epub" && savedProgress.cfi
+        ? savedProgress.cfi
+        : undefined;
+
+    if (savedCfi) {
+      try {
+        await withTimeout(
+          rendition.display(savedCfi),
+          12000,
+          "EPUB render timed out.",
+        );
+      } catch {
+        await withTimeout(rendition.display(), 12000, "EPUB render timed out.");
+      }
+    } else {
+      await withTimeout(rendition.display(), 12000, "EPUB render timed out.");
+    }
     attachSelectionToCurrentChapter();
+    const initialProgress = updateEpubLocation(
+      rendition.currentLocation(),
+      book,
+    );
+    setReaderProgress(true, initialProgress.ratio, initialProgress.label);
+    queueReaderProgressSave(initialProgress.payload);
 
     setTimeout(() => {
       if (!stage.querySelector("iframe")) {
@@ -922,14 +1548,51 @@ async function openEpubReader(url) {
   }
 }
 
+function mountPdfReader(fileUrl, itemId) {
+  const progress = getCurrentItemReadingProgress(itemId);
+  const progressRatio =
+    progress && progress.kind === "pdf" && typeof progress.ratio === "number"
+      ? clampProgressRatio(progress.ratio)
+      : null;
+
+  const iframe = document.createElement("iframe");
+  const progressQuery =
+    progressRatio === null ? "" : `&progress=${progressRatio}`;
+  iframe.src = `/pdf-reader.html?file=${encodeURIComponent(fileUrl)}${progressQuery}`;
+  readerContent.innerHTML = "";
+  readerContent.appendChild(iframe);
+  readerIframe = iframe;
+
+  iframe.onload = () => {
+    setupIframeSelectionListener();
+    applyHighlightsToDocument();
+    setTimeout(applyHighlightsToDocument, 500);
+    setTimeout(applyHighlightsToDocument, 1400);
+  };
+}
+
 async function openReader(id, url, title, type) {
   resetEpubReader();
+  stopArticleProgressPoll();
+  stopMobileSelectionPoll();
   currentReaderId = id;
   readerIframe = null;
   currentHighlights = [];
+  lockBackgroundScroll();
   readerModal.style.display = "flex";
   readerTitle.textContent = title;
   readerOpenOriginal.href = url;
+  setReaderSidebarOpen(false);
+
+  const currentItem = itemsById.get(Number(id));
+  const itemProgress = getItemProgressInfo(currentItem);
+  if (itemProgress) {
+    setReaderProgress(true, itemProgress.ratio, itemProgress.label);
+  } else if (type !== "video" && type !== "podcast") {
+    setReaderProgress(true, 0, "0%");
+  } else {
+    setReaderProgress(false);
+  }
 
   await loadHighlights(id);
 
@@ -956,23 +1619,10 @@ async function openReader(id, url, title, type) {
   }
 
   if (type === "pdf" || url.toLowerCase().endsWith(".pdf")) {
-    if (!url.startsWith("/uploads/")) {
-      readerContent.innerHTML = `<iframe src="${url}"></iframe>`;
-      return;
-    }
-
-    const iframe = document.createElement("iframe");
-    iframe.src = `/pdf-reader.html?file=${encodeURIComponent(url)}`;
-    readerContent.innerHTML = "";
-    readerContent.appendChild(iframe);
-    readerIframe = iframe;
-
-    iframe.onload = () => {
-      setupIframeSelectionListener();
-      applyHighlightsToDocument();
-      setTimeout(applyHighlightsToDocument, 500);
-      setTimeout(applyHighlightsToDocument, 1400);
-    };
+    const fileUrl = url.startsWith("/uploads/")
+      ? url
+      : `/api/proxy/pdf?url=${encodeURIComponent(url)}`;
+    mountPdfReader(fileUrl, id);
     return;
   }
 
@@ -1005,14 +1655,19 @@ async function openReader(id, url, title, type) {
       iframe.onload = () => {
         applyHighlightsToDocument();
         setupIframeSelectionListener();
+        setupArticleProgressTracking(url);
       };
 
       setTimeout(() => {
         applyHighlightsToDocument();
         setupIframeSelectionListener();
+        setupArticleProgressTracking(url);
       }, 100);
     } else if (data.type === "pdf") {
-      readerContent.innerHTML = `<iframe src="${data.url}"></iframe>`;
+      const fileUrl = data.url.startsWith("/uploads/")
+        ? data.url
+        : `/api/proxy/pdf?url=${encodeURIComponent(data.url)}`;
+      mountPdfReader(fileUrl, id);
     } else {
       showReaderError(
         url,
@@ -1043,20 +1698,43 @@ function showReaderError(url, message) {
 
 function closeReader() {
   resetEpubReader();
+  stopArticleProgressPoll();
+  stopMobileSelectionPoll();
+  setReaderSidebarOpen(false);
+  setReaderProgress(false);
+  if (pendingProgressSave) {
+    clearTimeout(pendingProgressSave);
+    const itemId = pendingProgressItemId;
+    const payload = pendingProgressPayload;
+    pendingProgressSave = null;
+    pendingProgressItemId = null;
+    pendingProgressPayload = null;
+    persistReaderProgress(itemId, payload);
+  }
   readerModal.style.display = "none";
   readerContent.innerHTML = "";
   currentReaderId = null;
   readerIframe = null;
   currentHighlights = [];
   hideSelectionPopup();
+  unlockBackgroundScroll();
+  loadItems();
 }
 
 readerClose.addEventListener("click", closeReader);
 
-// Toggle sidebar
+function setReaderSidebarOpen(isOpen) {
+  if (isOpen) {
+    readerSidebar.classList.remove("hidden");
+    readerToggleNotes.classList.add("active");
+    return;
+  }
+  readerSidebar.classList.add("hidden");
+  readerToggleNotes.classList.remove("active");
+}
+
 readerToggleNotes.addEventListener("click", () => {
-  readerSidebar.classList.toggle("hidden");
-  readerToggleNotes.classList.toggle("active");
+  setReaderSidebarOpen(readerSidebar.classList.contains("hidden"));
 });
 
 // Highlights functionality
@@ -1219,6 +1897,65 @@ function isMobileViewport() {
   return window.matchMedia("(max-width: 768px)").matches;
 }
 
+function getActiveSelectionText(doc) {
+  if (!doc) return "";
+  const selection = doc.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return "";
+  }
+  return selection.toString().trim();
+}
+
+function clearIframeSelection() {
+  if (!readerIframe) return;
+  try {
+    const doc =
+      readerIframe.contentDocument || readerIframe.contentWindow.document;
+    const selection = doc?.getSelection?.();
+    if (!selection || selection.rangeCount === 0) return;
+    selection.removeAllRanges();
+  } catch {}
+}
+
+function scheduleMobilePopupAutoDismiss() {
+  if (!isMobileViewport()) return;
+  if (!selectionPopup || selectionPopup.style.display === "none") return;
+  if (mobilePopupDismissTimer) clearTimeout(mobilePopupDismissTimer);
+
+  mobilePopupDismissTimer = setTimeout(() => {
+    mobilePopupDismissTimer = null;
+    if (!selectionPopup || selectionPopup.style.display === "none") return;
+    if (noteModal && noteModal.style.display !== "none") return;
+    clearIframeSelection();
+    hideSelectionPopup();
+  }, 1500);
+}
+
+function startMobileSelectionPoll() {
+  stopMobileSelectionPoll();
+  if (!isMobileViewport()) return;
+
+  mobileSelectionPoll = setInterval(() => {
+    if (!readerIframe) return;
+
+    try {
+      const doc =
+        readerIframe.contentDocument || readerIframe.contentWindow.document;
+      const selection = doc.getSelection();
+      const selectedText = getActiveSelectionText(doc);
+
+      if (selectedText.length > 0) {
+        showSelectionPopup(selection);
+        return;
+      }
+
+      hideSelectionPopup();
+    } catch (error) {
+      console.error("Failed to poll mobile selection:", error);
+    }
+  }, 180);
+}
+
 // Selection handling in iframe
 function setupIframeSelectionListener() {
   if (!readerIframe) return;
@@ -1232,17 +1969,25 @@ function setupIframeSelectionListener() {
 
     doc.addEventListener("mouseup", handleIframeSelection);
     doc.addEventListener("touchend", handleIframeSelection);
+    doc.addEventListener("touchcancel", handleIframeSelection);
     doc.addEventListener("selectionchange", handleIframeSelection);
+    doc.addEventListener("pointerup", handleIframeSelection);
+    doc.addEventListener("selectstart", scheduleMobileSelectionProbe);
+    doc.addEventListener("contextmenu", scheduleMobileSelectionProbe);
 
     doc.addEventListener("pointerdown", () => {
       setTimeout(handleIframeSelection, 50);
     });
+
+    startMobileSelectionPoll();
   } catch (error) {
     console.error("Failed to setup iframe selection listener:", error);
   }
 }
 
 function handleIframeSelection() {
+  const delay = isMobileViewport() ? 120 : 35;
+
   setTimeout(() => {
     if (!readerIframe) return;
 
@@ -1250,17 +1995,61 @@ function handleIframeSelection() {
       const doc =
         readerIframe.contentDocument || readerIframe.contentWindow.document;
       const selection = doc.getSelection();
-      const selectedText = selection ? selection.toString().trim() : "";
+      const selectedText = getActiveSelectionText(doc);
 
       if (selectedText.length > 0) {
+        if (pendingMobileSelectionCheck) {
+          clearTimeout(pendingMobileSelectionCheck);
+          pendingMobileSelectionCheck = null;
+        }
         showSelectionPopup(selection);
       } else {
-        hideSelectionPopup();
+        if (!isMobileViewport()) {
+          hideSelectionPopup();
+          return;
+        }
+        scheduleMobileSelectionProbe();
       }
     } catch (error) {
       console.error("Failed to handle iframe selection:", error);
     }
-  }, 35);
+  }, delay);
+}
+
+function scheduleMobileSelectionProbe() {
+  if (!isMobileViewport()) return;
+  if (pendingMobileSelectionCheck) clearTimeout(pendingMobileSelectionCheck);
+
+  let tries = 0;
+  const maxTries = 14;
+  const probe = () => {
+    pendingMobileSelectionCheck = null;
+    if (!readerIframe) return;
+
+    try {
+      const doc =
+        readerIframe.contentDocument || readerIframe.contentWindow.document;
+      const selection = doc.getSelection();
+      const selectedText = getActiveSelectionText(doc);
+
+      if (selectedText.length > 0) {
+        showSelectionPopup(selection);
+        return;
+      }
+    } catch (error) {
+      console.error("Failed to probe mobile selection:", error);
+      return;
+    }
+
+    tries += 1;
+    if (tries >= maxTries) {
+      hideSelectionPopup();
+      return;
+    }
+    pendingMobileSelectionCheck = setTimeout(probe, 120);
+  };
+
+  pendingMobileSelectionCheck = setTimeout(probe, 80);
 }
 
 function showSelectionPopup(selection) {
@@ -1274,6 +2063,7 @@ function showSelectionPopup(selection) {
     selectionPopup.style.left = "";
     selectionPopup.style.top = "";
     selectionPopup.style.display = "block";
+    scheduleMobilePopupAutoDismiss();
     return;
   }
 
@@ -1297,6 +2087,14 @@ function showSelectionPopup(selection) {
 }
 
 function hideSelectionPopup() {
+  if (pendingMobileSelectionCheck) {
+    clearTimeout(pendingMobileSelectionCheck);
+    pendingMobileSelectionCheck = null;
+  }
+  if (mobilePopupDismissTimer) {
+    clearTimeout(mobilePopupDismissTimer);
+    mobilePopupDismissTimer = null;
+  }
   selectionPopup.classList.remove("mobile-fab");
   selectionPopup.style.left = "";
   selectionPopup.style.top = "";
@@ -1308,16 +2106,32 @@ function hideSelectionPopup() {
 popupHighlightBtn.addEventListener("click", () => {
   if (pendingSelectionText) {
     openNoteModal(pendingSelectionText);
+    clearIframeSelection();
     hideSelectionPopup();
   }
 });
+
+document.addEventListener(
+  "pointerdown",
+  (event) => {
+    if (!isMobileViewport()) return;
+    if (!selectionPopup || selectionPopup.style.display === "none") return;
+    if (noteModal && noteModal.style.display !== "none") return;
+    if (selectionPopup.contains(event.target)) return;
+    hideSelectionPopup();
+    clearIframeSelection();
+  },
+  true,
+);
 
 // Note modal functions
 function openNoteModal(selectedText) {
   noteModalQuote.textContent = selectedText;
   noteModalText.value = "";
   noteModal.style.display = "flex";
-  noteModalText.focus();
+  if (!isMobileViewport()) {
+    noteModalText.focus();
+  }
 }
 
 function closeNoteModal() {
@@ -1351,11 +2165,7 @@ noteModalSave.addEventListener("click", async () => {
       renderSidebarHighlights();
       applyHighlightsToDocument();
 
-      // Show sidebar if hidden
-      if (readerSidebar.classList.contains("hidden")) {
-        readerSidebar.classList.remove("hidden");
-        readerToggleNotes.classList.add("active");
-      }
+      setReaderSidebarOpen(true);
 
       closeNoteModal();
     }
@@ -1566,8 +2376,8 @@ function formatDate(dateStr) {
   const date = new Date(dateStr);
   const now = new Date();
   const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "today";
-  if (diffDays === 1) return "yesterday";
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString("en-US", {
     month: "short",
@@ -1577,9 +2387,16 @@ function formatDate(dateStr) {
 }
 
 function getDomain(url) {
+  if (typeof url === "string" && url.startsWith("/uploads/")) {
+    return "Local file";
+  }
+
   try {
     return new URL(url).hostname.replace("www.", "");
   } catch {
+    if (typeof url === "string" && url.startsWith("/")) {
+      return "Local file";
+    }
     return url.substring(0, 30);
   }
 }
@@ -1668,10 +2485,26 @@ if (
   document.documentElement.classList.add("dark");
 }
 
-themeToggle.addEventListener("click", () => {
-  const isDark = document.documentElement.classList.toggle("dark");
+function toggleThemeMode() {
+  const root = document.documentElement;
+  root.classList.add("theme-switching");
+  const isDark = root.classList.toggle("dark");
   localStorage.setItem("theme", isDark ? "dark" : "light");
-});
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      root.classList.remove("theme-switching");
+    });
+  });
+}
+
+if (themeToggle) {
+  themeToggle.addEventListener("click", toggleThemeMode);
+}
+
+if (readerThemeToggle) {
+  readerThemeToggle.addEventListener("click", toggleThemeMode);
+}
 
 // Initialize
 loadItems();

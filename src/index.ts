@@ -465,6 +465,49 @@ app.get("/api/proxy", async (c) => {
   }
 });
 
+app.get("/api/proxy/pdf", async (c) => {
+  const url = c.req.query("url");
+  if (!url) return c.json({ error: "URL is required" }, 400);
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "application/pdf,*/*;q=0.8",
+      },
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return c.json({ error: "Failed to fetch PDF" }, 502);
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (
+      !contentType.includes("application/pdf") &&
+      !url.toLowerCase().includes(".pdf")
+    ) {
+      return c.json({ error: "URL did not return a PDF document" }, 400);
+    }
+
+    const bytes = await response.arrayBuffer();
+    return new Response(bytes, {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch {
+    return c.json({ error: "Failed to fetch PDF" }, 500);
+  }
+});
+
 app.post("/api/import/readwise", async (c) => {
   const contentType = c.req.header("content-type") || "";
   let csv = "";
@@ -836,6 +879,28 @@ app.patch("/api/items/:id", async (c) => {
   if (body.notes !== undefined) {
     db.query("UPDATE items SET notes = ? WHERE id = ?").run(body.notes, id);
   }
+
+  return c.json({ success: true });
+});
+
+app.patch("/api/items/:id/progress", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+  const progress = body?.progress;
+
+  let serialized = "";
+  if (progress && typeof progress === "object") {
+    try {
+      serialized = JSON.stringify(progress);
+    } catch {
+      serialized = "";
+    }
+  }
+
+  db.query("UPDATE items SET reading_progress = ? WHERE id = ?").run(
+    serialized,
+    id,
+  );
 
   return c.json({ success: true });
 });

@@ -2,6 +2,12 @@ const statusEl = document.getElementById("status");
 const containerEl = document.getElementById("pdf-container");
 const params = new URLSearchParams(window.location.search);
 const fileUrl = params.get("file");
+const initialProgressRaw = Number(params.get("progress"));
+const initialProgress =
+  Number.isFinite(initialProgressRaw) && initialProgressRaw >= 0
+    ? Math.min(1, initialProgressRaw)
+    : null;
+let progressTicking = false;
 
 if (!fileUrl) {
   statusEl.textContent = "Missing file URL.";
@@ -26,6 +32,9 @@ async function initPdfReader(url) {
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       await renderPdfPage(pdf, pageNumber);
     }
+
+    restoreInitialProgress();
+    setupProgressTracking();
   } catch (error) {
     statusEl.textContent = "Failed to load PDF.";
     console.error(error);
@@ -66,4 +75,48 @@ async function renderPdfPage(pdf, pageNumber) {
     viewport,
     textDivs: [],
   });
+}
+
+function getProgressRatio() {
+  const root = document.scrollingElement || document.documentElement;
+  const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight);
+  if (maxScroll === 0) return 0;
+  return Math.max(0, Math.min(1, root.scrollTop / maxScroll));
+}
+
+function postProgress() {
+  if (!window.parent || window.parent === window) return;
+  window.parent.postMessage(
+    {
+      type: "reading-progress",
+      kind: "pdf",
+      ratio: getProgressRatio(),
+    },
+    "*",
+  );
+}
+
+function scheduleProgressPost() {
+  if (progressTicking) return;
+  progressTicking = true;
+  requestAnimationFrame(() => {
+    progressTicking = false;
+    postProgress();
+  });
+}
+
+function restoreInitialProgress() {
+  if (initialProgress === null) return;
+  const root = document.scrollingElement || document.documentElement;
+  const apply = () => {
+    const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight);
+    root.scrollTop = maxScroll * initialProgress;
+  };
+  apply();
+  setTimeout(apply, 120);
+}
+
+function setupProgressTracking() {
+  window.addEventListener("scroll", scheduleProgressPost, { passive: true });
+  scheduleProgressPost();
 }

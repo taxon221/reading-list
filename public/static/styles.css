@@ -7,7 +7,7 @@
 }
 
 :root {
-    --bg: #f8f9fa;
+    --bg: #eef1f4;
     --bg-card: #ffffff;
     --text: #1a1a1a;
     --text-muted: #6b7280;
@@ -16,6 +16,9 @@
     --border-focus: #3b82f6;
     --accent: #3b82f6;
     --accent-hover: #2563eb;
+    --highlight-accent: #1b4a53;
+    --highlight-accent-hover: #143942;
+    --highlight-ink: #f8fafc;
     --success: #10b981;
     --danger: #ef4444;
     --radius: 10px;
@@ -32,8 +35,18 @@
     --text-light: #6b7280;
     --border: #2d2d2d;
     --border-focus: #3b82f6;
+    --highlight-accent: #2f6a78;
+    --highlight-accent-hover: #245664;
+    --highlight-ink: #edf9fc;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
     --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+:root.theme-switching *,
+:root.theme-switching *::before,
+:root.theme-switching *::after {
+    transition: none !important;
+    animation: none !important;
 }
 
 body {
@@ -552,6 +565,38 @@ header h1 {
     color: var(--text-light);
 }
 
+.item-progress-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1875rem;
+    width: 100%;
+    max-width: 6.25rem;
+}
+
+.item-progress-label {
+    font-size: 0.6875rem;
+    color: var(--text-light);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.item-progress-bar {
+    width: 100%;
+    height: 0.25rem;
+    border-radius: 999px;
+    background: var(--bg);
+    overflow: hidden;
+}
+
+.item-progress-fill {
+    display: block;
+    width: 0%;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 0.2s ease;
+}
+
 .item-type.type-article {
     background: #dbeafe;
     color: #1e40af;
@@ -626,6 +671,17 @@ header h1 {
 
 .item-domain {
     color: var(--text-light);
+}
+
+.item-progress {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.4rem;
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 0.6875rem;
+    font-weight: 600;
 }
 
 .item-tag {
@@ -1097,25 +1153,36 @@ header h1 {
 .popup-highlight-btn {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.375rem;
     padding: 0.5rem 0.75rem;
-    background: var(--accent);
-    color: white;
+    background: var(--highlight-accent);
+    color: var(--highlight-ink);
     border: none;
     border-radius: 4px;
     font-size: 0.8125rem;
     font-weight: 500;
     font-family: inherit;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background-color 0.12s;
 }
 
 .popup-highlight-btn:hover {
-    background: var(--accent-hover);
+    background: var(--highlight-accent-hover);
 }
 
 .popup-highlight-btn svg {
-    stroke: white;
+    stroke: currentColor;
+    flex-shrink: 0;
+}
+
+:root.dark .popup-highlight-btn {
+    background: var(--highlight-accent);
+    color: var(--highlight-ink);
+}
+
+:root.dark .popup-highlight-btn:hover {
+    background: var(--highlight-accent-hover);
 }
 
 .selection-popup.mobile-fab {
@@ -1130,17 +1197,27 @@ header h1 {
 }
 
 .selection-popup.mobile-fab .popup-highlight-btn {
+    display: block;
+    position: relative;
     width: 52px;
     height: 52px;
     padding: 0;
     border-radius: 999px;
     font-size: 0;
+    line-height: 0;
+    gap: 0;
     box-shadow: var(--shadow-lg);
 }
 
 .selection-popup.mobile-fab .popup-highlight-btn svg {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
+    display: block;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    margin: 0;
+    transform: translate(-50%, -50%);
 }
 
 /* Note Modal */
@@ -1196,7 +1273,7 @@ header h1 {
     padding: 0.75rem;
     border: 1.5px solid var(--border);
     border-radius: var(--radius-sm);
-    font-size: 0.875rem;
+    font-size: 1rem;
     font-family: inherit;
     background: var(--bg-card);
     color: var(--text);
@@ -1278,9 +1355,16 @@ header h1 {
 
     .item-col-left {
         flex-direction: row;
+        flex-wrap: wrap;
         align-items: center;
         gap: 0.5rem;
         min-width: auto;
+    }
+
+    .item-progress-stack {
+        order: 3;
+        flex-basis: 100%;
+        max-width: 7.5rem;
     }
 
     .btn-more {
@@ -1311,6 +1395,7 @@ header h1 {
     z-index: 2000;
     display: flex;
     flex-direction: column;
+    overscroll-behavior: contain;
 }
 
 .reader-container {
@@ -1328,12 +1413,52 @@ header h1 {
 
 .reader-header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.75rem 1rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem 0.75rem;
     background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+}
+
+.reader-header-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.reader-progress {
+    display: none;
+    align-items: center;
+    gap: 0.625rem;
+    width: 100%;
+}
+
+.reader-progress-track {
+    flex: 1;
+    height: 0.35rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--bg);
+}
+
+.reader-progress-fill {
+    width: 0%;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 0.15s linear;
+}
+
+.reader-progress-label {
+    min-width: 2.75rem;
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--text-light);
+    font-variant-numeric: tabular-nums;
 }
 
 .reader-title {
@@ -1344,7 +1469,7 @@ header h1 {
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 1;
-    margin-right: 1rem;
+    margin-right: 0;
 }
 
 .reader-actions {
@@ -1393,6 +1518,7 @@ header h1 {
     overflow: hidden;
     background: var(--bg);
     min-width: 0;
+    overscroll-behavior: contain;
 }
 
 .reader-content iframe {
@@ -1442,6 +1568,75 @@ header h1 {
 .ebook-stage {
     flex: 1;
     min-height: 0;
+    padding: 0.5rem;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+    overflow: hidden;
+}
+
+.ebook-stage-frame {
+    width: 100%;
+    max-width: 860px;
+    min-height: 0;
+    height: 100%;
+    flex: 1;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+}
+
+.ebook-stage-frame iframe {
+    border: none;
+}
+
+.ebook-tap-zone {
+    display: none;
+    touch-action: manipulation;
+    pointer-events: auto;
+}
+
+@media (min-width: 769px) {
+    .ebook-stage {
+        padding: 1.25rem 1.75rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .ebook-stage {
+        padding: 0;
+    }
+
+    .ebook-stage-frame {
+        max-width: none;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    .ebook-tap-zone {
+        display: block;
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 18%;
+        border: none;
+        background: transparent;
+        z-index: 10;
+    }
+
+    .ebook-tap-zone.left {
+        left: 0;
+    }
+
+    .ebook-tap-zone.right {
+        right: 0;
+    }
 }
 
 /* Reader Sidebar (Highlights) */

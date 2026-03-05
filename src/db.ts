@@ -35,6 +35,14 @@ export function initDb() {
     // Column already exists, ignore error
   }
 
+  try {
+    db.run(
+      `ALTER TABLE items ADD COLUMN reading_progress TEXT NOT NULL DEFAULT ''`,
+    );
+  } catch (e) {
+    // Column already exists, ignore error
+  }
+
   db.run(`
     CREATE TABLE IF NOT EXISTS tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
