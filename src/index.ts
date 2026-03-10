@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { cors } from "hono/cors";
+import { lookup } from "node:dns/promises";
 import { existsSync, mkdirSync, unlinkSync } from "fs";
+import { isIP } from "node:net";
 import { basename, extname, join } from "path";
 import { db, initDb } from "./db";
 
@@ -334,16 +336,95 @@ function removeUploadedFileIfExists(url: string) {
   } catch {}
 }
 
+function isPrivateIpAddress(address: string): boolean {
+  const normalized = address.toLowerCase().replace(/^::ffff:/, "");
+  const version = isIP(normalized);
+
+  if (version === 4) {
+    const [a, b] = normalized.split(".").map((part) => Number(part));
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
+  }
+
+  if (version === 6) {
+    return (
+      normalized === "::1" ||
+      normalized.startsWith("fc") ||
+      normalized.startsWith("fd") ||
+      normalized.startsWith("fe80:")
+    );
+  }
+
+  return false;
+}
+
+async function getSafeRemoteUrl(rawUrl: string): Promise<string | null> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return null;
+  }
+
+  if (parsed.username || parsed.password) {
+    return null;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    !hostname ||
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local")
+  ) {
+    return null;
+  }
+
+  if (isPrivateIpAddress(hostname)) {
+    return null;
+  }
+
+  try {
+    const records = await lookup(hostname, { all: true, verbatim: true });
+    if (
+      records.length === 0 ||
+      records.some((record) => isPrivateIpAddress(record.address))
+    ) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return parsed.toString();
+}
+
 app.get("/api/fetch-meta", async (c) => {
   const url = c.req.query("url");
   if (!url) return c.json({ error: "URL is required" }, 400);
+
+  const safeUrl = await getSafeRemoteUrl(url);
+  if (!safeUrl) {
+    return c.json({ error: "URL is not allowed" }, 400);
+  }
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
 
-    const response = await fetch(url, {
+    const response = await fetch(safeUrl, {
       signal: controller.signal,
+      redirect: "manual",
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; ReadingListBot/1.0)",
         Accept:
@@ -354,7 +435,7 @@ app.get("/api/fetch-meta", async (c) => {
     clearTimeout(timeout);
 
     const contentType = response.headers.get("content-type") || "";
-    const type = detectType(url, contentType);
+    const type = detectType(safeUrl, contentType);
     let title = null;
     let author = null;
 
@@ -369,9 +450,9 @@ app.get("/api/fetch-meta", async (c) => {
 
     if (!title) {
       try {
-        title = new URL(url).hostname.replace("www.", "");
+        title = new URL(safeUrl).hostname.replace("www.", "");
       } catch {
-        title = url;
+        title = safeUrl;
       }
     }
 
@@ -379,13 +460,13 @@ app.get("/api/fetch-meta", async (c) => {
   } catch {
     let fallbackTitle;
     try {
-      fallbackTitle = new URL(url).hostname.replace("www.", "");
+      fallbackTitle = new URL(safeUrl).hostname.replace("www.", "");
     } catch {
-      fallbackTitle = url;
+      fallbackTitle = safeUrl;
     }
     return c.json({
       title: fallbackTitle,
-      type: detectType(url),
+      type: detectType(safeUrl),
       author: null,
     });
   }
@@ -395,12 +476,18 @@ app.get("/api/proxy", async (c) => {
   const url = c.req.query("url");
   if (!url) return c.json({ error: "URL is required" }, 400);
 
+  const safeUrl = await getSafeRemoteUrl(url);
+  if (!safeUrl) {
+    return c.json({ error: "URL is not allowed" }, 400);
+  }
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
-    const response = await fetch(url, {
+    const response = await fetch(safeUrl, {
       signal: controller.signal,
+      redirect: "manual",
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -416,7 +503,7 @@ app.get("/api/proxy", async (c) => {
 
     // For PDFs, return the URL to be loaded directly in iframe
     if (contentType.includes("application/pdf")) {
-      return c.json({ type: "pdf", url });
+      return c.json({ type: "pdf", url: safeUrl });
     }
 
     // For HTML content, process and return
@@ -427,7 +514,7 @@ app.get("/api/proxy", async (c) => {
       let html = await response.text();
 
       // Extract the base URL for relative links
-      const baseUrl = new URL(url);
+      const baseUrl = new URL(safeUrl);
       const baseHref = `${baseUrl.protocol}//${baseUrl.host}`;
 
       // Add base tag for relative URLs
@@ -452,11 +539,11 @@ app.get("/api/proxy", async (c) => {
         },
       );
 
-      return c.json({ type: "html", content: html, url });
+      return c.json({ type: "html", content: html, url: safeUrl });
     }
 
     // For other content types, return info
-    return c.json({ type: "unsupported", contentType, url });
+    return c.json({ type: "unsupported", contentType, url: safeUrl });
   } catch (error: any) {
     return c.json(
       { error: "Failed to fetch content", message: error.message },
@@ -469,12 +556,18 @@ app.get("/api/proxy/pdf", async (c) => {
   const url = c.req.query("url");
   if (!url) return c.json({ error: "URL is required" }, 400);
 
+  const safeUrl = await getSafeRemoteUrl(url);
+  if (!safeUrl) {
+    return c.json({ error: "URL is not allowed" }, 400);
+  }
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
 
-    const response = await fetch(url, {
+    const response = await fetch(safeUrl, {
       signal: controller.signal,
+      redirect: "manual",
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -491,7 +584,7 @@ app.get("/api/proxy/pdf", async (c) => {
     const contentType = response.headers.get("content-type") || "";
     if (
       !contentType.includes("application/pdf") &&
-      !url.toLowerCase().includes(".pdf")
+      !safeUrl.toLowerCase().includes(".pdf")
     ) {
       return c.json({ error: "URL did not return a PDF document" }, 400);
     }
@@ -505,6 +598,55 @@ app.get("/api/proxy/pdf", async (c) => {
     });
   } catch {
     return c.json({ error: "Failed to fetch PDF" }, 500);
+  }
+});
+
+app.get("/api/proxy/epub", async (c) => {
+  const url = c.req.query("url");
+  if (!url) return c.json({ error: "URL is required" }, 400);
+
+  const safeUrl = await getSafeRemoteUrl(url);
+  if (!safeUrl) {
+    return c.json({ error: "URL is not allowed" }, 400);
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
+    const response = await fetch(safeUrl, {
+      signal: controller.signal,
+      redirect: "manual",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "application/epub+zip,*/*;q=0.8",
+      },
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return c.json({ error: "Failed to fetch EPUB" }, 502);
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (
+      !contentType.includes("application/epub+zip") &&
+      !safeUrl.toLowerCase().includes(".epub")
+    ) {
+      return c.json({ error: "URL did not return an EPUB document" }, 400);
+    }
+
+    const bytes = await response.arrayBuffer();
+    return new Response(bytes, {
+      headers: {
+        "Content-Type": "application/epub+zip",
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch {
+    return c.json({ error: "Failed to fetch EPUB" }, 500);
   }
 });
 
