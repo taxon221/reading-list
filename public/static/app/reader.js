@@ -179,6 +179,143 @@ function createEpubShell() {
   return { wrapper, stage, locationEl, prevBtn, nextBtn, prevZone, nextZone };
 }
 
+function escapeReaderHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function buildParsedArticleDocument(data) {
+  const isDark = document.documentElement.classList.contains("dark");
+  const title = escapeReaderHtml(data.title || "");
+  const byline = escapeReaderHtml(data.byline || "");
+  const excerpt = escapeReaderHtml(data.excerpt || "");
+  const content = data.content || "";
+  const background = isDark ? "#101419" : "#f7f1e6";
+  const text = isDark ? "#f2ede3" : "#231a14";
+  const muted = isDark ? "#bcae97" : "#7b6553";
+  const accent = isDark ? "#ffba5c" : "#c46d23";
+  const rule = isDark ? "rgba(255,255,255,0.08)" : "rgba(35,26,20,0.1)";
+  const quote = isDark ? "rgba(255,186,92,0.16)" : "rgba(196,109,35,0.09)";
+
+  return `<!DOCTYPE html>
+<html lang="en" data-reader-kind="parsed-article">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>${title || "Article"}</title>
+    <style>
+      :root {
+        color-scheme: ${isDark ? "dark" : "light"};
+        --rl-reader-bg: ${background};
+        --rl-reader-text: ${text};
+        --rl-reader-muted: ${muted};
+        --rl-reader-accent: ${accent};
+        --rl-reader-rule: ${rule};
+        --rl-reader-quote: ${quote};
+      }
+      html {
+        scroll-behavior: smooth;
+        background: var(--rl-reader-bg);
+      }
+      body {
+        margin: 0 auto;
+        padding: 96px 20px 120px;
+        max-width: 44rem;
+        background: var(--rl-reader-bg);
+        color: var(--rl-reader-text);
+        font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+        font-size: 20px;
+        line-height: 1.78;
+        letter-spacing: 0.01em;
+        -webkit-text-size-adjust: 100%;
+      }
+      .rl-reader-header {
+        margin: 0 0 2.6rem;
+        padding-bottom: 1.4rem;
+        border-bottom: 1px solid var(--rl-reader-rule);
+      }
+      .rl-reader-header h1 {
+        margin: 0 0 0.7rem;
+        font-size: clamp(2rem, 4vw, 3.2rem);
+        line-height: 1.03;
+        letter-spacing: -0.02em;
+      }
+      .rl-byline,
+      .rl-excerpt {
+        margin: 0.35rem 0 0;
+        color: var(--rl-reader-muted);
+      }
+      .rl-excerpt {
+        font-size: 0.98em;
+      }
+      img, video, iframe {
+        max-width: 100%;
+        height: auto;
+        border-radius: 18px;
+      }
+      figure {
+        margin-inline: 0;
+      }
+      pre, code {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      a {
+        color: var(--rl-reader-accent);
+      }
+      blockquote {
+        margin-inline: 0;
+        padding: 0.2rem 1rem;
+        border-left: 3px solid var(--rl-reader-accent);
+        background: var(--rl-reader-quote);
+        border-radius: 0 14px 14px 0;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        display: block;
+        overflow-x: auto;
+      }
+      hr {
+        border: 0;
+        border-top: 1px solid var(--rl-reader-rule);
+        margin: 2rem 0;
+      }
+      span.reader-highlight {
+        background: rgba(255, 190, 92, 0.35);
+        border-radius: 0.25em;
+        padding: 0.04em 0.02em;
+      }
+    </style>
+    <script>
+      window.__readingListSetTheme = function(theme) {
+        if (!theme) return;
+        const root = document.documentElement;
+        root.style.colorScheme = theme.isDark ? "dark" : "light";
+        root.style.setProperty("--rl-reader-bg", theme.background);
+        root.style.setProperty("--rl-reader-text", theme.text);
+        root.style.setProperty("--rl-reader-muted", theme.muted);
+        root.style.setProperty("--rl-reader-accent", theme.accent);
+        root.style.setProperty("--rl-reader-rule", theme.rule);
+        root.style.setProperty("--rl-reader-quote", theme.quote);
+      };
+    </script>
+  </head>
+  <body>
+    <header class="rl-reader-header">
+      <h1>${title}</h1>
+      ${byline ? `<p class="rl-byline">${byline}</p>` : ""}
+      ${excerpt ? `<p class="rl-excerpt">${excerpt}</p>` : ""}
+    </header>
+    ${content}
+  </body>
+</html>`;
+}
+
 function getRemoteReaderUrl(itemUrl) {
   if (!URL.canParse(itemUrl)) return null;
 
@@ -206,10 +343,24 @@ function getReaderSourceUrl(itemUrl, type) {
   }
 
   if (type === "article") {
-    return `/api/proxy?url=${encodeURIComponent(remoteUrl)}`;
+    return `/api/proxy?url=${encodeURIComponent(remoteUrl)}&mode=parsed`;
   }
 
   return remoteUrl;
+}
+
+function getArticleReaderTheme() {
+  const isDark = document.documentElement.classList.contains("dark");
+
+  return {
+    isDark,
+    background: isDark ? "#101419" : "#f7f1e6",
+    text: isDark ? "#f2ede3" : "#231a14",
+    muted: isDark ? "#bcae97" : "#7b6553",
+    accent: isDark ? "#ffba5c" : "#c46d23",
+    rule: isDark ? "rgba(255,255,255,0.08)" : "rgba(35,26,20,0.1)",
+    quote: isDark ? "rgba(255,186,92,0.16)" : "rgba(196,109,35,0.09)",
+  };
 }
 
 export function initReader(app) {
@@ -218,6 +369,29 @@ export function initReader(app) {
   };
   Object.assign(readerApi, initReaderProgress());
   Object.assign(readerApi, initReaderHighlights(app, readerApi));
+
+  function syncOpenArticleTheme() {
+    const iframe = state.readerIframe;
+    const doc = iframe?.contentDocument || iframe?.contentWindow?.document || null;
+    if (!doc?.documentElement) return;
+    if (doc.documentElement.dataset.readerKind !== "parsed-article") return;
+
+    const theme = getArticleReaderTheme();
+    iframe.style.background = theme.background;
+
+    if (typeof iframe.contentWindow?.__readingListSetTheme === "function") {
+      iframe.contentWindow.__readingListSetTheme(theme);
+      return;
+    }
+
+    doc.documentElement.style.colorScheme = theme.isDark ? "dark" : "light";
+    doc.documentElement.style.setProperty("--rl-reader-bg", theme.background);
+    doc.documentElement.style.setProperty("--rl-reader-text", theme.text);
+    doc.documentElement.style.setProperty("--rl-reader-muted", theme.muted);
+    doc.documentElement.style.setProperty("--rl-reader-accent", theme.accent);
+    doc.documentElement.style.setProperty("--rl-reader-rule", theme.rule);
+    doc.documentElement.style.setProperty("--rl-reader-quote", theme.quote);
+  }
 
   function mountPdfReader(fileUrl, itemId) {
     if (!dom.readerContent) return;
@@ -562,19 +736,26 @@ export function initReader(app) {
       dom.readerContent.replaceChildren(iframe);
       state.readerIframe = iframe;
 
+      const articleDocument =
+        typeof data.byline === "string" || typeof data.excerpt === "string"
+          ? buildParsedArticleDocument(data)
+          : data.content;
+
       state.readerBlobUrl = URL.createObjectURL(
-        new Blob([data.content], { type: "text/html" }),
+        new Blob([articleDocument], { type: "text/html" }),
       );
       iframe.src = state.readerBlobUrl;
 
       iframe.onload = () => {
         revokeReaderBlobUrl();
+        syncOpenArticleTheme();
         readerApi.applyHighlightsToDocument?.();
         readerApi.setupIframeSelectionListener?.();
         readerApi.setupArticleProgressTracking?.(itemUrl);
       };
 
       setTimeout(() => {
+        syncOpenArticleTheme();
         readerApi.applyHighlightsToDocument?.();
         readerApi.setupIframeSelectionListener?.();
         readerApi.setupArticleProgressTracking?.(itemUrl);
@@ -646,4 +827,6 @@ export function initReader(app) {
     app.closeItemMenu?.();
     readerApi.hideSelectionPopup?.();
   });
+
+  document.addEventListener("readinglist:themechange", syncOpenArticleTheme);
 }

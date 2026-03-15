@@ -5,6 +5,8 @@ import { lookup } from "node:dns/promises";
 import { existsSync, mkdirSync, unlinkSync } from "fs";
 import { isIP } from "node:net";
 import { basename, extname, join } from "path";
+import { JSDOM, VirtualConsole } from "jsdom";
+import { Readability } from "@mozilla/readability";
 import { db, initDb } from "./db";
 
 const app = new Hono();
@@ -72,9 +74,6 @@ function detectType(url: string, contentType?: string): string {
 }
 
 function parseTitle(html: string): string | null {
-  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-  if (titleMatch) return decodeHtmlEntities(titleMatch[1].trim());
-
   const ogMatch = html.match(
     /<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i,
   );
@@ -84,6 +83,19 @@ function parseTitle(html: string): string | null {
     /<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i,
   );
   if (ogMatchAlt) return decodeHtmlEntities(ogMatchAlt[1].trim());
+
+  const twitterMatch = html.match(
+    /<meta[^>]*name=["']twitter:title["'][^>]*content=["']([^"']+)["']/i,
+  );
+  if (twitterMatch) return decodeHtmlEntities(twitterMatch[1].trim());
+
+  const twitterMatchAlt = html.match(
+    /<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:title["']/i,
+  );
+  if (twitterMatchAlt) return decodeHtmlEntities(twitterMatchAlt[1].trim());
+
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (titleMatch) return decodeHtmlEntities(titleMatch[1].trim());
 
   return null;
 }
@@ -240,6 +252,83 @@ function fallbackTitle(url: string): string {
   } catch {
     return url;
   }
+}
+
+function absoluteAttributeUrl(baseUrl: URL, value: string): string {
+  if (!value || value.startsWith("#")) return value;
+  if (
+    value.startsWith("data:") ||
+    value.startsWith("javascript:") ||
+    value.startsWith("mailto:") ||
+    value.startsWith("tel:")
+  ) {
+    return value;
+  }
+
+  if (URL.canParse(value)) {
+    return value;
+  }
+
+  if (URL.canParse(value, baseUrl)) {
+    return new URL(value, baseUrl).toString();
+  }
+
+  return value;
+}
+
+function absolutizeDocumentUrls(document: Document, baseUrl: URL) {
+  for (const attribute of ["src", "href", "poster"]) {
+    const nodes = document.querySelectorAll<HTMLElement>(`[${attribute}]`);
+    for (const node of Array.from(nodes)) {
+      const value = node.getAttribute(attribute);
+      if (!value) continue;
+      node.setAttribute(attribute, absoluteAttributeUrl(baseUrl, value));
+    }
+  }
+}
+
+function serializeDocumentHtml(html: string, sourceUrl: string) {
+  const virtualConsole = new VirtualConsole();
+  const dom = new JSDOM(html, { url: sourceUrl, virtualConsole });
+  const { document } = dom.window;
+  const baseUrl = new URL(sourceUrl);
+
+  absolutizeDocumentUrls(document, baseUrl);
+
+  if (!document.querySelector("base")) {
+    const base = document.createElement("base");
+    base.href = baseUrl.toString();
+    document.head?.prepend(base);
+  }
+
+  return `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
+}
+
+function extractArticleContent(html: string, sourceUrl: string) {
+  const virtualConsole = new VirtualConsole();
+  const dom = new JSDOM(html, { url: sourceUrl, virtualConsole });
+  const { document } = dom.window;
+  const baseUrl = new URL(sourceUrl);
+
+  absolutizeDocumentUrls(document, baseUrl);
+
+  const article = new Readability(document).parse();
+  if (article?.content) {
+    return {
+      title: article.title || parseTitle(html) || fallbackTitle(sourceUrl),
+      byline: article.byline || parseAuthor(html) || "",
+      excerpt: article.excerpt || "",
+      content: article.content,
+    };
+  }
+
+  const bodyContent = document.body?.innerHTML?.trim();
+  return {
+    title: parseTitle(html) || fallbackTitle(sourceUrl),
+    byline: parseAuthor(html) || "",
+    excerpt: "",
+    content: bodyContent || "",
+  };
 }
 
 function getFileExtension(name: string): string {
@@ -474,6 +563,7 @@ app.get("/api/fetch-meta", async (c) => {
 
 app.get("/api/proxy", async (c) => {
   const url = c.req.query("url");
+  const mode = c.req.query("mode");
   if (!url) return c.json({ error: "URL is required" }, 400);
 
   const safeUrl = await getSafeRemoteUrl(url);
@@ -499,6 +589,10 @@ app.get("/api/proxy", async (c) => {
 
     clearTimeout(timeout);
 
+    if (!response.ok) {
+      return c.json({ error: "Failed to fetch content" }, 502);
+    }
+
     const contentType = response.headers.get("content-type") || "";
 
     // For PDFs, return the URL to be loaded directly in iframe
@@ -506,40 +600,30 @@ app.get("/api/proxy", async (c) => {
       return c.json({ type: "pdf", url: safeUrl });
     }
 
-    // For HTML content, process and return
     if (
       contentType.includes("text/html") ||
       contentType.includes("application/xhtml")
     ) {
-      let html = await response.text();
+      const html = await response.text();
 
-      // Extract the base URL for relative links
-      const baseUrl = new URL(safeUrl);
-      const baseHref = `${baseUrl.protocol}//${baseUrl.host}`;
-
-      // Add base tag for relative URLs
-      if (!html.includes("<base")) {
-        html = html.replace(
-          /<head([^>]*)>/i,
-          `<head$1><base href="${baseHref}/">`,
-        );
+      if (mode === "parsed") {
+        const article = extractArticleContent(html, safeUrl);
+        return c.json({
+          type: "html",
+          url: safeUrl,
+          title: article.title,
+          byline: article.byline,
+          excerpt: article.excerpt,
+          content: article.content,
+        });
       }
 
-      // Remove scripts that might cause issues
-      html = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
-
-      // Fix relative URLs in common attributes
-      html = html.replace(
-        /(href|src|action)=["'](?!https?:\/\/|\/\/|#|javascript:|mailto:|data:)([^"']+)["']/gi,
-        (match, attr, path) => {
-          if (path.startsWith("/")) {
-            return `${attr}="${baseHref}${path}"`;
-          }
-          return `${attr}="${baseHref}/${path}"`;
-        },
-      );
-
-      return c.json({ type: "html", content: html, url: safeUrl });
+      return c.json({
+        type: "html",
+        url: safeUrl,
+        title: parseTitle(html) || fallbackTitle(safeUrl),
+        content: serializeDocumentHtml(html, safeUrl),
+      });
     }
 
     // For other content types, return info

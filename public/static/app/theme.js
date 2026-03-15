@@ -5,6 +5,11 @@ function toggleThemeMode() {
   root.classList.add("theme-switching");
   const isDark = root.classList.toggle("dark");
   localStorage.setItem("theme", isDark ? "dark" : "light");
+  document.dispatchEvent(
+    new CustomEvent("readinglist:themechange", {
+      detail: { isDark },
+    }),
+  );
 
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
