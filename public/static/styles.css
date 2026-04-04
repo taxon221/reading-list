@@ -83,11 +83,29 @@ header h1 {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    position: relative;
 }
 
+.header-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    padding: 0 0.7rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.header-link,
 .import-btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     height: 36px;
     padding: 0 0.75rem;
     border: 1px solid var(--border);
@@ -97,10 +115,80 @@ header h1 {
     font-size: 0.85rem;
     cursor: pointer;
     transition: all 0.15s;
+    text-decoration: none;
 }
 
+.header-link:hover,
 .import-btn:hover {
     background: var(--bg);
+}
+
+.account-menu {
+    position: relative;
+}
+
+.account-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    height: 36px;
+    padding: 0 0.8rem;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+    border-radius: 999px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.account-button:hover,
+.account-button[aria-expanded="true"] {
+    background: var(--bg);
+}
+
+.account-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.account-popover {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    min-width: 220px;
+    padding: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    box-shadow: var(--shadow-lg);
+    z-index: 20;
+}
+
+.account-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.account-email,
+.account-meta {
+    margin-top: 0.2rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.account-action {
+    width: 100%;
+    margin-top: 0.75rem;
 }
 
 .import-btn:disabled {
