@@ -1,4 +1,4 @@
-import { dom, state } from "./shared.js";
+import { dom, handleAuthFailure, showUnauthorizedState, state } from "./shared.js";
 import {
   createEmptyState,
   formatDate,
@@ -87,7 +87,10 @@ function highlightTextInDocument(doc, text) {
   const nodesToHighlight = [];
   let node = null;
 
-  while ((node = walker.nextNode())) {
+  while (true) {
+    node = walker.nextNode();
+    if (!node) break;
+
     const nodeText = node.textContent || "";
     const normalizedNodeText = nodeText.replace(/\s+/g, " ");
 
@@ -437,8 +440,13 @@ export function initReaderHighlights(app, readerApi) {
     const response = await fetch(`/api/items/${itemId}/highlights`).catch(
       () => null,
     );
-    state.currentHighlights =
-      response && response.ok ? await response.json() : [];
+    if (response && handleAuthFailure(response)) {
+      state.currentHighlights = [];
+      renderSidebarHighlights();
+      return;
+    }
+
+    state.currentHighlights = response?.ok ? await response.json() : [];
     renderSidebarHighlights();
   }
 
@@ -465,6 +473,11 @@ export function initReaderHighlights(app, readerApi) {
       if (dom.notesList) {
         dom.notesList.replaceChildren(createEmptyState("Failed to load highlights"));
       }
+      return;
+    }
+
+    if (handleAuthFailure(response)) {
+      state.allHighlights = [];
       return;
     }
 
@@ -496,6 +509,7 @@ export function initReaderHighlights(app, readerApi) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note: newNote }),
       }).catch(() => null);
+      if (response && handleAuthFailure(response)) return;
       if (!response?.ok) return;
 
       highlight.note = newNote;
@@ -509,6 +523,7 @@ export function initReaderHighlights(app, readerApi) {
       const response = await fetch(`/api/highlights/${highlightId}`, {
         method: "DELETE",
       }).catch(() => null);
+      if (response && handleAuthFailure(response)) return;
       if (!response?.ok) return;
 
       state.currentHighlights = state.currentHighlights.filter(
@@ -548,6 +563,7 @@ export function initReaderHighlights(app, readerApi) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note: newNote }),
       }).catch(() => null);
+      if (response && handleAuthFailure(response)) return;
       if (!response?.ok) return;
 
       highlight.note = newNote;
@@ -561,6 +577,7 @@ export function initReaderHighlights(app, readerApi) {
       const response = await fetch(`/api/highlights/${highlightId}`, {
         method: "DELETE",
       }).catch(() => null);
+      if (response && handleAuthFailure(response)) return;
       if (!response?.ok) return;
 
       state.allHighlights = state.allHighlights.filter(
@@ -586,6 +603,10 @@ export function initReaderHighlights(app, readerApi) {
 
   dom.noteModalSave?.addEventListener("click", async () => {
     if (!state.currentReaderId || !dom.noteModalQuote?.textContent) return;
+    if (state.isUnauthorized) {
+      showUnauthorizedState(state.authMessage);
+      return;
+    }
 
     const response = await fetch(
       `/api/items/${state.currentReaderId}/highlights`,
@@ -599,6 +620,7 @@ export function initReaderHighlights(app, readerApi) {
       },
     ).catch(() => null);
 
+    if (response && handleAuthFailure(response)) return;
     if (!response?.ok) {
       alert("Failed to save highlight. Please try again.");
       return;

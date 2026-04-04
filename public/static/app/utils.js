@@ -74,7 +74,9 @@ export function setupTagInput(input, tagArray, container) {
 export function renderTagPills(tagArray, container, input) {
   if (!container || !input) return;
 
-  container.querySelectorAll(".tag-pill").forEach((pill) => pill.remove());
+  container.querySelectorAll(".tag-pill").forEach((pill) => {
+    pill.remove();
+  });
   tagArray.forEach((tag) => {
     const pill = document.createElement("span");
     pill.className = "tag-pill";
@@ -101,7 +103,10 @@ export function parseSearchQuery(input) {
     /(?:(title|author|url)\s*:\s*(~)?)\s*(?:"([^"]*)"|(\S+))|(?:"([^"]*)"|(\S+))/gi;
   let match = null;
 
-  while ((match = pattern.exec(input)) !== null) {
+  while (true) {
+    match = pattern.exec(input);
+    if (match === null) break;
+
     const field = (match[1] || "").toLowerCase();
     const isRegex = Boolean(match[2]);
     const fieldValue = (match[3] || match[4] || "").trim();
@@ -297,6 +302,16 @@ export function getDomain(url) {
 
   if (typeof url === "string" && url.startsWith("/")) return "Local file";
   return String(url || "").substring(0, 30);
+}
+
+export function getAuthorizedItemUrl(url) {
+  if (typeof url !== "string" || !url) return "";
+  if (!url.startsWith("/uploads/")) return url;
+
+  const filename = url.slice("/uploads/".length);
+  if (!filename || !/^[a-zA-Z0-9._-]+$/.test(filename)) return "";
+
+  return `/api/uploads/${encodeURIComponent(filename)}`;
 }
 
 export function createEmptyState(title, hint = "", className = "empty-state") {

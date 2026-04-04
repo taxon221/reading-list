@@ -2,6 +2,7 @@ import { dom, state } from "./shared.js";
 import {
   clampProgressRatio,
   createSvgIcon,
+  getAuthorizedItemUrl,
   getItemProgressInfo,
   isMobileViewport,
   withTimeout,
@@ -77,8 +78,9 @@ function showReaderError(url, message) {
 
   const linkWrap = document.createElement("p");
   const link = document.createElement("a");
-  if (URL.canParse(url, window.location.origin)) {
-    const parsedUrl = new URL(url, window.location.origin);
+  const authorizedUrl = getAuthorizedItemUrl(url);
+  if (URL.canParse(authorizedUrl, window.location.origin)) {
+    const parsedUrl = new URL(authorizedUrl, window.location.origin);
     if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
       link.href = parsedUrl.toString();
     }
@@ -329,7 +331,7 @@ function getRemoteReaderUrl(itemUrl) {
 
 function getReaderSourceUrl(itemUrl, type) {
   if (typeof itemUrl !== "string" || !itemUrl) return null;
-  if (itemUrl.startsWith("/uploads/")) return itemUrl;
+  if (itemUrl.startsWith("/uploads/")) return getAuthorizedItemUrl(itemUrl);
 
   const remoteUrl = getRemoteReaderUrl(itemUrl);
   if (!remoteUrl) return null;
@@ -347,6 +349,31 @@ function getReaderSourceUrl(itemUrl, type) {
   }
 
   return remoteUrl;
+}
+
+function getSafeReaderFetchUrl(url, allowedPathPrefixes) {
+  if (typeof url !== "string" || !url) return null;
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url, window.location.origin);
+  } catch {
+    return null;
+  }
+
+  if (parsedUrl.origin !== window.location.origin) {
+    return null;
+  }
+
+  if (
+    !Array.from(allowedPathPrefixes).some((prefix) =>
+      parsedUrl.pathname === prefix || parsedUrl.pathname.startsWith(`${prefix}/`),
+    )
+  ) {
+    return null;
+  }
+
+  return parsedUrl.toString();
 }
 
 function getArticleReaderTheme() {
@@ -535,8 +562,16 @@ export function initReader(app) {
     };
 
     try {
+      const safeSourceUrl = getSafeReaderFetchUrl(
+        sourceUrl,
+        new Set(["/api/proxy/epub", "/api/uploads"]),
+      );
+      if (!safeSourceUrl) {
+        throw new Error("This EPUB URL is not supported.");
+      }
+
       const fileResponse = await withTimeout(
-        fetch(sourceUrl),
+        fetch(safeSourceUrl),
         15000,
         "Timed out loading EPUB file.",
       );
@@ -645,7 +680,9 @@ export function initReader(app) {
     lockBackgroundScroll();
     if (dom.readerModal) dom.readerModal.style.display = "flex";
     if (dom.readerTitle) dom.readerTitle.textContent = title;
-    if (dom.readerOpenOriginal) dom.readerOpenOriginal.href = itemUrl;
+    if (dom.readerOpenOriginal) {
+      dom.readerOpenOriginal.href = getAuthorizedItemUrl(itemUrl);
+    }
     setReaderSidebarOpen(false);
 
     const currentItem = state.itemsById.get(Number(id));
@@ -711,7 +748,19 @@ export function initReader(app) {
       return;
     }
 
-    const response = await fetch(articleUrl).catch(() => null);
+    const safeArticleUrl = getSafeReaderFetchUrl(
+      articleUrl,
+      new Set(["/api/proxy"]),
+    );
+    if (!safeArticleUrl) {
+      showReaderError(
+        itemUrl,
+        "This article URL is not supported.",
+      );
+      return;
+    }
+
+    const response = await fetch(safeArticleUrl).catch(() => null);
     if (!response) {
       showReaderError(
         itemUrl,

@@ -5,14 +5,21 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "lint": "biome lint src public/static/app",
+    "typecheck": "tsc --noEmit --target esnext --module esnext --moduleResolution bundler --skipLibCheck src/access.ts src/index.ts src/db.ts src/auth-isolation.test.ts",
+    "test": "bun test",
+    "check": "bun run lint && bun run typecheck && bun run test"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "hono": "^4.4.0",
+    "jose": "^6.2.1",
     "jsdom": "^28.1.0"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@biomejs/biome": "^2.4.7",
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
   }
 }

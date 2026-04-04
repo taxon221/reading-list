@@ -1,4 +1,10 @@
-import { defaultUrlPlaceholder, dom, state } from "./shared.js";
+import {
+  defaultUrlPlaceholder,
+  dom,
+  handleAuthFailure,
+  showUnauthorizedState,
+  state,
+} from "./shared.js";
 import {
   extractUrlFromText,
   getSupportedUploadFiles,
@@ -75,6 +81,10 @@ function stageSelectedFiles(fileList) {
 
 async function addPendingUploadFile(app) {
   if (!state.pendingUploadFile || !dom.submitBtn) return;
+  if (state.isUnauthorized) {
+    showUnauthorizedState(state.authMessage);
+    return;
+  }
 
   const originalText = dom.submitBtn.textContent;
   dom.submitBtn.disabled = true;
@@ -98,6 +108,10 @@ async function addPendingUploadFile(app) {
       return;
     }
 
+    if (handleAuthFailure(response)) {
+      return;
+    }
+
     const data = await response.json();
 
     if (!response.ok) {
@@ -113,7 +127,7 @@ async function addPendingUploadFile(app) {
 
     if (
       (data.skipped || 0) > 0 ||
-      (data.failed_files && data.failed_files.length)
+      data.failed_files?.length
     ) {
       const failed = (data.failed_files || [])
         .map((entry) => `- ${entry.name}: ${entry.reason}`)
@@ -141,6 +155,11 @@ function initImport(app) {
 
   dom.importBtn.addEventListener("click", () => dom.importFile?.click());
   dom.importFile.addEventListener("change", async () => {
+    if (state.isUnauthorized) {
+      showUnauthorizedState(state.authMessage);
+      return;
+    }
+
     const file = dom.importFile?.files?.[0];
     if (!file) return;
 
@@ -157,6 +176,10 @@ function initImport(app) {
       }).catch(() => null);
       if (!response) {
         alert("Import failed. Please try again.");
+        return;
+      }
+
+      if (handleAuthFailure(response)) {
         return;
       }
 
@@ -245,6 +268,11 @@ function initMetadataLookup() {
 
 async function submitItemForm(app, event) {
   event.preventDefault();
+  if (state.isUnauthorized) {
+    showUnauthorizedState(state.authMessage);
+    return;
+  }
+
   const url = dom.urlInput?.value.trim() || "";
 
   if (!url) {
@@ -290,6 +318,7 @@ async function submitItemForm(app, event) {
       }),
     });
 
+    if (handleAuthFailure(response)) return;
     if (!response.ok) return;
     resetAddForm(app);
   } finally {

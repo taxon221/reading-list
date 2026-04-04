@@ -1,9 +1,10 @@
-import { dom, state } from "./shared.js";
+import { dom, handleAuthFailure, showUnauthorizedState, state } from "./shared.js";
 import {
   applySearch,
   createEmptyState,
   createSvgIcon,
   formatDate,
+  getAuthorizedItemUrl,
   getDomain,
   renderItemProgressMeta,
   renderTagPills,
@@ -274,6 +275,8 @@ function renderTagOptions(tags) {
 }
 
 async function loadItems() {
+  if (state.isUnauthorized) return;
+
   const params = new URLSearchParams();
   if (state.selectedTags.length > 0) {
     params.set("tags", state.selectedTags.join(","));
@@ -283,14 +286,24 @@ async function loadItems() {
   }
 
   const url = `/api/items${params.toString() ? `?${params.toString()}` : ""}`;
-  const response = await fetch(url);
+  const response = await fetch(url).catch(() => null);
+  if (!response) return;
+  if (handleAuthFailure(response)) return;
+  if (!response.ok) return;
+
   const items = await response.json();
   state.itemsById = new Map(items.map((item) => [Number(item.id), item]));
   renderItems(applySearch(items, state.searchQuery));
 }
 
 async function loadTags() {
-  const response = await fetch("/api/tags");
+  if (state.isUnauthorized) return;
+
+  const response = await fetch("/api/tags").catch(() => null);
+  if (!response) return;
+  if (handleAuthFailure(response)) return;
+  if (!response.ok) return;
+
   const tags = await response.json();
   renderTagOptions(tags);
   updateTagFilterDisplay();
@@ -321,7 +334,9 @@ function openItemMenu(button, id, url) {
 
   document
     .querySelectorAll(".btn-more")
-    .forEach((node) => node.classList.remove("active"));
+    .forEach((node) => {
+      node.classList.remove("active");
+    });
   button.classList.add("active");
 }
 
@@ -333,27 +348,44 @@ function closeItemMenu() {
   state.currentDropdownItemUrl = null;
   document
     .querySelectorAll(".btn-more")
-    .forEach((node) => node.classList.remove("active"));
+    .forEach((node) => {
+      node.classList.remove("active");
+    });
 }
 
 async function toggleRead(id, currentStatus) {
-  await fetch(`/api/items/${id}`, {
+  if (state.isUnauthorized) return;
+
+  const response = await fetch(`/api/items/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ is_read: !currentStatus }),
-  });
+  }).catch(() => null);
+  if (!response) return;
+  if (handleAuthFailure(response)) return;
+
   loadItems();
 }
 
 async function deleteItem(id) {
+  if (state.isUnauthorized) return;
   if (!confirm("Delete this item?")) return;
-  await fetch(`/api/items/${id}`, { method: "DELETE" });
+  const response = await fetch(`/api/items/${id}`, { method: "DELETE" }).catch(
+    () => null,
+  );
+  if (!response) return;
+  if (handleAuthFailure(response)) return;
+
   loadItems();
   loadTags();
 }
 
 async function openEditModal(id) {
-  const response = await fetch(`/api/items/${id}`);
+  if (state.isUnauthorized) return;
+
+  const response = await fetch(`/api/items/${id}`).catch(() => null);
+  if (!response) return;
+  if (handleAuthFailure(response)) return;
   if (!response.ok || !dom.editModal) return;
 
   const item = await response.json();
@@ -482,7 +514,10 @@ function initItemMenu() {
 
   dom.dropdownOpenUrl?.addEventListener("click", () => {
     if (state.currentDropdownItemUrl) {
-      window.open(state.currentDropdownItemUrl, "_blank", "noopener");
+      const safeUrl = getAuthorizedItemUrl(state.currentDropdownItemUrl);
+      if (safeUrl) {
+        window.open(safeUrl, "_blank", "noopener");
+      }
     }
     closeItemMenu();
   });
@@ -547,6 +582,11 @@ function initEditModal() {
 
   dom.editForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (state.isUnauthorized) {
+      showUnauthorizedState(state.authMessage);
+      return;
+    }
+
     const payload = {
       url: dom.editUrlInput?.value.trim() || "",
       title: dom.editTitleInput?.value.trim() || "",
@@ -554,11 +594,13 @@ function initEditModal() {
       tags: state.editTags,
     };
 
-    await fetch(`/api/items/${dom.editIdInput?.value}`, {
+    const response = await fetch(`/api/items/${dom.editIdInput?.value}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }).catch(() => null);
+    if (!response) return;
+    if (handleAuthFailure(response)) return;
 
     closeEditModal();
     loadItems();

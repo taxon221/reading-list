@@ -1,34 +1,295 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { serveStatic } from "hono/bun";
 import { cors } from "hono/cors";
 import { lookup } from "node:dns/promises";
-import { existsSync, mkdirSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { isIP } from "node:net";
-import { basename, extname, join } from "path";
+import { basename, extname, resolve } from "node:path";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { Readability } from "@mozilla/readability";
-import { db, initDb } from "./db";
+import { verifyAccessToken } from "./access";
+import { dataDir, db, initDb } from "./db";
 
-const app = new Hono();
+type CurrentUser = {
+  id: number;
+  email: string;
+  display_name: string;
+  is_admin: number;
+  created_at: string;
+};
+
+type ItemRow = {
+  id: number;
+  user_id: number;
+  url: string;
+  title: string;
+  author: string;
+  type: string;
+  notes: string;
+  created_at: string;
+  is_read: number;
+  reading_progress: string;
+};
+
+type HighlightRow = {
+  id: number;
+  user_id: number;
+  item_id: number;
+  selected_text: string;
+  note: string;
+  created_at: string;
+};
+
+type TagRow = {
+  name: string;
+};
+
+type AppBindings = {
+  Variables: {
+    currentUser: CurrentUser;
+  };
+};
+
+const app = new Hono<AppBindings>();
 
 initDb();
 
 app.use("/*", cors());
 app.use("/static/*", serveStatic({ root: "./public" }));
-app.use("/uploads/*", serveStatic({ root: "./data" }));
 app.get(
   "/manifest.webmanifest",
   serveStatic({ path: "./public/manifest.webmanifest" }),
 );
 app.get("/pdf-reader.html", serveStatic({ path: "./public/pdf-reader.html" }));
 app.get("/", serveStatic({ path: "./public/index.html" }));
+app.get("/api/auth/info", async (c) => c.json(await getAuthUiUrls(c)));
 
-const uploadsDir = "./data/uploads";
+app.use("/api/*", async (c, next) => {
+  const { status, user } = await resolveRequestUser(c);
+  if (status === 401) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  if (!user) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
+  c.set("currentUser", user);
+  await next();
+});
+
+const uploadsDir = `${dataDir}/uploads`;
+const uploadsRoot = resolve(uploadsDir);
 if (!existsSync(uploadsDir)) {
   mkdirSync(uploadsDir, { recursive: true });
 }
 
 const allowedUploadExtensions = new Set(["pdf", "epub"]);
+const bootstrapAdminEmail = normalizeEmail(Bun.env.BOOTSTRAP_ADMIN_EMAIL);
+const publicAppUrl = normalizeUrl(Bun.env.APP_PUBLIC_URL);
+const cloudflareAccessTeamDomain = normalizeUrl(
+  Bun.env.CLOUDFLARE_ACCESS_TEAM_DOMAIN,
+);
+
+function normalizeEmail(value: string | undefined | null): string {
+  return (value || "").trim().toLowerCase();
+}
+
+function normalizeUrl(value: string | undefined | null): string {
+  return (value || "").trim().replace(/\/+$/, "");
+}
+
+function defaultDisplayName(email: string): string {
+  const localPart = email.split("@")[0]?.trim();
+  return localPart || email;
+}
+
+function getLocalDevAuthEmail(): string {
+  return normalizeEmail(Bun.env.LOCAL_DEV_AUTH_EMAIL);
+}
+
+function getConfiguredAuthMode() {
+  const value = (Bun.env.AUTH_MODE || "").trim().toLowerCase();
+  if (value === "local" || value === "cloudflare") return value;
+  return "";
+}
+
+function getCurrentUser(c: Context<AppBindings>): CurrentUser {
+  return c.get("currentUser");
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]"
+  );
+}
+
+async function getAuthUiUrls(c: Context<AppBindings>) {
+  const requestUrl = new URL(c.req.url);
+  const origin = requestUrl.origin;
+  const loginUrl =
+    publicAppUrl || (isLoopbackHostname(requestUrl.hostname) ? "" : origin);
+  const appLogoutBase =
+    publicAppUrl || (isLoopbackHostname(requestUrl.hostname) ? "" : origin);
+  const switchAccountUrl =
+    getConfiguredAuthMode() === "cloudflare" && cloudflareAccessTeamDomain
+      ? `${cloudflareAccessTeamDomain}/cdn-cgi/access/logout`
+      : "";
+  const { user } = await resolveRequestUser(c);
+
+  return {
+    authMode: getConfiguredAuthMode(),
+    publicAppUrl,
+    loginUrl,
+    logoutUrl: appLogoutBase ? `${appLogoutBase}/cdn-cgi/access/logout` : "",
+    switchAccountUrl,
+    currentUser: user
+      ? {
+          email: user.email,
+          displayName: user.display_name,
+          isAdmin: Boolean(user.is_admin),
+        }
+      : null,
+  };
+}
+
+function getLocalDevIdentity(c: Context<AppBindings>) {
+  if (getConfiguredAuthMode() !== "local") return null;
+
+  const localDevAuthEmail = getLocalDevAuthEmail();
+  if (!localDevAuthEmail) return null;
+
+  const hostname = new URL(c.req.url).hostname.toLowerCase();
+  if (!isLoopbackHostname(hostname)) return null;
+
+  return {
+    email: localDevAuthEmail,
+    displayName: defaultDisplayName(localDevAuthEmail),
+  };
+}
+
+async function resolveRequestUser(c: Context<AppBindings>) {
+  let identity = getLocalDevIdentity(c);
+
+  if (!identity && getConfiguredAuthMode() === "cloudflare") {
+    identity = await verifyAccessToken(
+      c.req.header("cf-access-jwt-assertion"),
+    ).catch(() => null);
+  }
+
+  if (!identity?.email) {
+    return { status: 401, user: null };
+  }
+
+  return {
+    status: 200,
+    user: findUserByEmail(identity.email) || ensureUser(identity.email, identity.displayName),
+  };
+}
+
+function findUserByEmail(email: string): CurrentUser | null {
+  return (
+    (db.query("SELECT * FROM users WHERE email = ?").get(email) as
+      | CurrentUser
+      | undefined) || null
+  );
+}
+
+function ensureUser(email: string, displayName: string): CurrentUser | null {
+  if (!email) return null;
+
+  const isAdmin = email === bootstrapAdminEmail ? 1 : 0;
+
+  db.query(
+    `
+      INSERT INTO users (email, display_name, is_admin)
+      VALUES (?, ?, ?)
+      ON CONFLICT(email) DO UPDATE SET
+        display_name = COALESCE(NULLIF(excluded.display_name, ''), users.display_name),
+        is_admin = CASE
+          WHEN excluded.is_admin = 1 THEN 1
+          ELSE users.is_admin
+        END
+    `,
+  ).run(email, displayName || defaultDisplayName(email), isAdmin);
+
+  return findUserByEmail(email);
+}
+
+function getOwnedItem(id: string | number | bigint, userId: number) {
+  return (db
+    .query("SELECT * FROM items WHERE id = ? AND user_id = ?")
+    .get(id, userId) as ItemRow | undefined) || null;
+}
+
+function getOwnedHighlight(id: string | number | bigint, userId: number) {
+  return (db
+    .query("SELECT * FROM highlights WHERE id = ? AND user_id = ?")
+    .get(id, userId) as HighlightRow | undefined) || null;
+}
+
+function getItemTags(
+  itemId: string | number | bigint,
+  userId: number,
+): string[] {
+  return db
+    .query(
+      `
+        SELECT t.name
+        FROM tags t
+        JOIN item_tags it ON t.id = it.tag_id
+        WHERE it.item_id = ? AND t.user_id = ?
+        ORDER BY t.name
+      `,
+    )
+    .all(itemId, userId)
+    .map((tag) => (tag as TagRow).name);
+}
+
+function normalizeTagNames(tags: unknown): string[] {
+  if (!Array.isArray(tags)) return [];
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const tagName of tags) {
+    const trimmed = String(tagName || "")
+      .trim()
+      .toLowerCase();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
+function attachTagsToItem(
+  itemId: string | number | bigint,
+  userId: number,
+  tags: unknown,
+) {
+  const normalizedTags = normalizeTagNames(tags);
+  if (normalizedTags.length === 0) return;
+
+  const insertTag = db.query(
+    "INSERT OR IGNORE INTO tags (user_id, name) VALUES (?, ?)",
+  );
+  const getTag = db.query("SELECT id FROM tags WHERE user_id = ? AND name = ?");
+  const insertItemTag = db.query(
+    "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
+  );
+
+  for (const tagName of normalizedTags) {
+    insertTag.run(userId, tagName);
+    const tag = getTag.get(userId, tagName) as { id: number } | undefined;
+    if (tag?.id) {
+      insertItemTag.run(itemId, tag.id);
+    }
+  }
+}
 
 function detectType(url: string, contentType?: string): string {
   const urlLower = url.toLowerCase();
@@ -112,7 +373,7 @@ function parseAuthor(html: string): string | null {
 
   for (const pattern of patterns) {
     const match = html.match(pattern);
-    if (match && match[1]) {
+    if (match?.[1]) {
       const author = decodeHtmlEntities(match[1].trim()).replace(/^@/, "");
       if (author) return author;
     }
@@ -413,16 +674,60 @@ function getUploadFilename(url: string): string | null {
   return filename;
 }
 
+function resolveUploadPath(filename: string): string | null {
+  if (!/^[a-zA-Z0-9._-]+$/.test(filename)) return null;
+
+  const filePath = resolve(uploadsRoot, filename);
+  const relativePath = filePath.slice(uploadsRoot.length);
+  if (
+    filePath !== uploadsRoot &&
+    !(relativePath.startsWith("/") || relativePath.startsWith("\\"))
+  ) {
+    return null;
+  }
+
+  return filePath;
+}
+
 function removeUploadedFileIfExists(url: string) {
   const filename = getUploadFilename(url);
   if (!filename) return;
 
-  const filePath = join(uploadsDir, filename);
+  const filePath = resolveUploadPath(filename);
+  if (!filePath) return;
   if (!existsSync(filePath)) return;
 
   try {
     unlinkSync(filePath);
   } catch {}
+}
+
+function getOwnedUploadFile(
+  filename: string,
+  userId: number,
+): { path: string; type: string } | null {
+  const filePath = resolveUploadPath(filename);
+  if (!filePath) return null;
+
+  const item = db
+    .query("SELECT type FROM items WHERE user_id = ? AND url = ? LIMIT 1")
+    .get(userId, `/uploads/${filename}`) as { type: string } | undefined;
+
+  if (!item || !existsSync(filePath)) return null;
+
+  return { path: filePath, type: item.type };
+}
+
+function getUploadContentType(type: string, filename: string): string {
+  if (type === "pdf" || filename.toLowerCase().endsWith(".pdf")) {
+    return "application/pdf";
+  }
+
+  if (type === "ebook" || filename.toLowerCase().endsWith(".epub")) {
+    return "application/epub+zip";
+  }
+
+  return "application/octet-stream";
 }
 
 function isPrivateIpAddress(address: string): boolean {
@@ -547,7 +852,7 @@ app.get("/api/fetch-meta", async (c) => {
 
     return c.json({ title, type, author });
   } catch {
-    let fallbackTitle;
+    let fallbackTitle = safeUrl;
     try {
       fallbackTitle = new URL(safeUrl).hostname.replace("www.", "");
     } catch {
@@ -628,9 +933,10 @@ app.get("/api/proxy", async (c) => {
 
     // For other content types, return info
     return c.json({ type: "unsupported", contentType, url: safeUrl });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     return c.json(
-      { error: "Failed to fetch content", message: error.message },
+      { error: "Failed to fetch content", message },
       500,
     );
   }
@@ -734,7 +1040,25 @@ app.get("/api/proxy/epub", async (c) => {
   }
 });
 
+app.get("/api/uploads/:filename", async (c) => {
+  const currentUser = getCurrentUser(c);
+  const filename = c.req.param("filename");
+  const upload = getOwnedUploadFile(filename, currentUser.id);
+
+  if (!upload) {
+    return c.json({ error: "File not found" }, 404);
+  }
+
+  return new Response(Bun.file(upload.path), {
+    headers: {
+      "Content-Type": getUploadContentType(upload.type, filename),
+      "Cache-Control": "no-store",
+    },
+  });
+});
+
 app.post("/api/import/readwise", async (c) => {
+  const currentUser = getCurrentUser(c);
   const contentType = c.req.header("content-type") || "";
   let csv = "";
 
@@ -794,11 +1118,15 @@ app.post("/api/import/readwise", async (c) => {
 
   const seen = new Set<string>();
   const insertItem = db.query(
-    "INSERT INTO items (url, title, author, type, created_at) VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))",
+    "INSERT INTO items (user_id, url, title, author, type, created_at) VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))",
   );
-  const existingItem = db.query("SELECT id FROM items WHERE url = ?");
-  const insertTag = db.query("INSERT OR IGNORE INTO tags (name) VALUES (?)");
-  const getTag = db.query("SELECT id FROM tags WHERE name = ?");
+  const existingItem = db.query(
+    "SELECT id FROM items WHERE user_id = ? AND url = ?",
+  );
+  const insertTag = db.query(
+    "INSERT OR IGNORE INTO tags (user_id, name) VALUES (?, ?)",
+  );
+  const getTag = db.query("SELECT id FROM tags WHERE user_id = ? AND name = ?");
   const insertItemTag = db.query(
     "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
   );
@@ -817,7 +1145,9 @@ app.post("/api/import/readwise", async (c) => {
           continue;
         }
 
-        const existing = existingItem.get(url) as { id: number } | undefined;
+        const existing = existingItem.get(currentUser.id, url) as
+          | { id: number }
+          | undefined;
         if (existing?.id) {
           duplicate++;
           continue;
@@ -837,6 +1167,7 @@ app.post("/api/import/readwise", async (c) => {
         const type = detectType(url);
 
         const result = insertItem.run(
+          currentUser.id,
           url,
           title || "",
           author,
@@ -847,8 +1178,10 @@ app.post("/api/import/readwise", async (c) => {
 
         if (tags.length > 0) {
           for (const tagName of tags) {
-            insertTag.run(tagName);
-            const tag = getTag.get(tagName) as { id: number } | undefined;
+            insertTag.run(currentUser.id, tagName);
+            const tag = getTag.get(currentUser.id, tagName) as
+              | { id: number }
+              | undefined;
             if (tag?.id) {
               insertItemTag.run(itemId, tag.id);
             }
@@ -868,6 +1201,7 @@ app.post("/api/import/readwise", async (c) => {
 });
 
 app.post("/api/import/file", async (c) => {
+  const currentUser = getCurrentUser(c);
   const contentType = c.req.header("content-type") || "";
   if (!contentType.includes("multipart/form-data")) {
     return c.json({ error: "Multipart form upload required" }, 400);
@@ -895,10 +1229,12 @@ app.post("/api/import/file", async (c) => {
   }
 
   const insertItem = db.query(
-    "INSERT INTO items (url, title, author, type) VALUES (?, ?, ?, ?)",
+    "INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, ?)",
   );
-  const insertTag = db.query("INSERT OR IGNORE INTO tags (name) VALUES (?)");
-  const getTag = db.query("SELECT id FROM tags WHERE name = ?");
+  const insertTag = db.query(
+    "INSERT OR IGNORE INTO tags (user_id, name) VALUES (?, ?)",
+  );
+  const getTag = db.query("SELECT id FROM tags WHERE user_id = ? AND name = ?");
   const insertItemTag = db.query(
     "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)",
   );
@@ -931,29 +1267,41 @@ app.post("/api/import/file", async (c) => {
           : parsed.author || "";
       const storedFilename = createStoredFilename(file.name, extension);
       storedUrl = `/uploads/${storedFilename}`;
-      const storedPath = join(uploadsDir, storedFilename);
+      const storedPath = resolveUploadPath(storedFilename);
+      if (!storedPath) {
+        throw new Error("Generated upload path is invalid.");
+      }
       const fileBuffer = new Uint8Array(await file.arrayBuffer());
       await Bun.write(storedPath, fileBuffer);
 
       const type = detectUploadedFileType(extension);
-      const result = insertItem.run(storedUrl, title, author, type);
+      const result = insertItem.run(
+        currentUser.id,
+        storedUrl,
+        title,
+        author,
+        type,
+      );
       const itemId = result.lastInsertRowid;
 
       for (const tagName of tags) {
-        insertTag.run(tagName);
-        const tag = getTag.get(tagName) as { id: number } | undefined;
+        insertTag.run(currentUser.id, tagName);
+        const tag = getTag.get(currentUser.id, tagName) as
+          | { id: number }
+          | undefined;
         if (tag?.id) {
           insertItemTag.run(itemId, tag.id);
         }
       }
 
       imported++;
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (storedUrl) removeUploadedFileIfExists(storedUrl);
       skipped++;
       failedFiles.push({
         name: file.name,
-        reason: error?.message || "Failed to process file.",
+        reason:
+          error instanceof Error ? error.message : "Failed to process file.",
       });
     }
   }
@@ -978,23 +1326,27 @@ app.post("/api/import/file", async (c) => {
 });
 
 app.get("/api/items", (c) => {
+  const currentUser = getCurrentUser(c);
   const tagsParam = c.req.query("tags");
   const typesParam = c.req.query("types");
 
   const tags = tagsParam ? tagsParam.split(",").filter(Boolean) : [];
   const types = typesParam ? typesParam.split(",").filter(Boolean) : [];
 
-  let query = "SELECT * FROM items";
+  let query = "SELECT * FROM items WHERE user_id = ?";
   const conditions: string[] = [];
-  const params: any[] = [];
+  const params: Array<string | number> = [currentUser.id];
 
   if (tags.length > 0) {
     const placeholders = tags.map(() => "?").join(",");
-    conditions.push(`id IN (
-      SELECT it.item_id FROM item_tags it
-      JOIN tags t ON it.tag_id = t.id
-      WHERE t.name IN (${placeholders})
-    )`);
+    conditions.push(
+      `id IN (
+        SELECT it.item_id FROM item_tags it
+        JOIN tags t ON it.tag_id = t.id
+        WHERE t.user_id = ? AND t.name IN (${placeholders})
+      )`,
+    );
+    params.push(currentUser.id);
     params.push(...tags);
   }
 
@@ -1005,114 +1357,129 @@ app.get("/api/items", (c) => {
   }
 
   if (conditions.length > 0) {
-    query += " WHERE " + conditions.join(" AND ");
+    query += ` AND ${conditions.join(" AND ")}`;
   }
 
   query += " ORDER BY created_at DESC";
 
   const items = db.query(query).all(...params);
 
-  const itemsWithTags = items.map((item: any) => {
-    const tags = db
-      .query(
-        `SELECT t.name FROM tags t JOIN item_tags it ON t.id = it.tag_id WHERE it.item_id = ?`,
-      )
-      .all(item.id)
-      .map((t: any) => t.name);
+  const itemsWithTags = items.map((item) => {
+    const typedItem = item as ItemRow;
+    const tags = getItemTags(typedItem.id, currentUser.id);
     const highlightCount = db
-      .query("SELECT COUNT(*) as count FROM highlights WHERE item_id = ?")
-      .get(item.id) as { count: number };
-    return { ...item, tags, highlight_count: highlightCount?.count || 0 };
+      .query(
+        "SELECT COUNT(*) as count FROM highlights WHERE item_id = ? AND user_id = ?",
+      )
+      .get(typedItem.id, currentUser.id) as { count: number };
+    return {
+      ...typedItem,
+      tags,
+      highlight_count: highlightCount?.count || 0,
+    };
   });
 
   return c.json(itemsWithTags);
 });
 
 app.get("/api/tags", (c) => {
+  const currentUser = getCurrentUser(c);
   const tags = db
     .query(
-      "SELECT name, COUNT(item_tags.tag_id) as count FROM tags LEFT JOIN item_tags ON tags.id = item_tags.tag_id GROUP BY tags.id HAVING count > 0 ORDER BY name",
+      `
+        SELECT tags.name, COUNT(items.id) as count
+        FROM tags
+        LEFT JOIN item_tags ON tags.id = item_tags.tag_id
+        LEFT JOIN items ON item_tags.item_id = items.id AND items.user_id = tags.user_id
+        WHERE tags.user_id = ?
+        GROUP BY tags.id
+        HAVING count > 0
+        ORDER BY tags.name
+      `,
     )
-    .all();
+    .all(currentUser.id);
   return c.json(tags);
 });
 
 app.post("/api/items", async (c) => {
+  const currentUser = getCurrentUser(c);
   const { url, title, author, type, tags } = await c.req.json();
 
   if (!url) return c.json({ error: "URL is required" }, 400);
 
   const result = db
-    .query(`INSERT INTO items (url, title, author, type) VALUES (?, ?, ?, ?)`)
-    .run(url, title || "", author || "", type || "article");
+    .query(
+      `INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(currentUser.id, url, title || "", author || "", type || "article");
 
   const itemId = result.lastInsertRowid;
-
-  if (tags && Array.isArray(tags)) {
-    for (const tagName of tags) {
-      const trimmed = tagName.trim().toLowerCase();
-      if (!trimmed) continue;
-
-      db.query("INSERT OR IGNORE INTO tags (name) VALUES (?)").run(trimmed);
-      const tag = db
-        .query("SELECT id FROM tags WHERE name = ?")
-        .get(trimmed) as any;
-      db.query("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?)").run(
-        itemId,
-        tag.id,
-      );
-    }
-  }
+  attachTagsToItem(itemId, currentUser.id, tags);
 
   return c.json({ id: itemId, success: true }, 201);
 });
 
 app.get("/api/items/:id", (c) => {
+  const currentUser = getCurrentUser(c);
   const id = c.req.param("id");
-  const item = db.query("SELECT * FROM items WHERE id = ?").get(id) as any;
+  const item = getOwnedItem(id, currentUser.id);
 
   if (!item) return c.json({ error: "Item not found" }, 404);
 
-  const tags = db
-    .query(
-      `SELECT t.name FROM tags t JOIN item_tags it ON t.id = it.tag_id WHERE it.item_id = ?`,
-    )
-    .all(id)
-    .map((t: any) => t.name);
-
-  return c.json({ ...item, tags });
+  return c.json({ ...item, tags: getItemTags(id, currentUser.id) });
 });
 
 app.patch("/api/items/:id", async (c) => {
+  const currentUser = getCurrentUser(c);
   const id = c.req.param("id");
   const body = await c.req.json();
+  const item = getOwnedItem(id, currentUser.id);
+
+  if (!item) return c.json({ error: "Item not found" }, 404);
 
   if (body.is_read !== undefined) {
-    db.query("UPDATE items SET is_read = ? WHERE id = ?").run(
+    db.query("UPDATE items SET is_read = ? WHERE id = ? AND user_id = ?").run(
       body.is_read ? 1 : 0,
       id,
+      currentUser.id,
     );
   }
 
   if (body.title !== undefined) {
-    db.query("UPDATE items SET title = ? WHERE id = ?").run(body.title, id);
+    db.query("UPDATE items SET title = ? WHERE id = ? AND user_id = ?").run(
+      body.title,
+      id,
+      currentUser.id,
+    );
   }
 
   if (body.author !== undefined) {
-    db.query("UPDATE items SET author = ? WHERE id = ?").run(body.author, id);
+    db.query("UPDATE items SET author = ? WHERE id = ? AND user_id = ?").run(
+      body.author,
+      id,
+      currentUser.id,
+    );
   }
 
   if (body.notes !== undefined) {
-    db.query("UPDATE items SET notes = ? WHERE id = ?").run(body.notes, id);
+    db.query("UPDATE items SET notes = ? WHERE id = ? AND user_id = ?").run(
+      body.notes,
+      id,
+      currentUser.id,
+    );
   }
 
   return c.json({ success: true });
 });
 
 app.patch("/api/items/:id/progress", async (c) => {
+  const currentUser = getCurrentUser(c);
   const id = c.req.param("id");
   const body = await c.req.json().catch(() => ({}));
   const progress = body?.progress;
+  const item = getOwnedItem(id, currentUser.id);
+
+  if (!item) return c.json({ error: "Item not found" }, 404);
 
   let serialized = "";
   if (progress && typeof progress === "object") {
@@ -1123,20 +1490,26 @@ app.patch("/api/items/:id/progress", async (c) => {
     }
   }
 
-  db.query("UPDATE items SET reading_progress = ? WHERE id = ?").run(
+  db.query(
+    "UPDATE items SET reading_progress = ? WHERE id = ? AND user_id = ?",
+  ).run(
     serialized,
     id,
+    currentUser.id,
   );
 
   return c.json({ success: true });
 });
 
 app.put("/api/items/:id", async (c) => {
+  const currentUser = getCurrentUser(c);
   const id = c.req.param("id");
   const { url, title, author, type, tags, notes } = await c.req.json();
-  const existingItem = db
-    .query("SELECT url, author FROM items WHERE id = ?")
-    .get(id) as { url: string; author: string } | undefined;
+  const existingItem = getOwnedItem(id, currentUser.id) as
+    | { url: string; author: string }
+    | null;
+
+  if (!existingItem) return c.json({ error: "Item not found" }, 404);
 
   if (existingItem?.url && existingItem.url !== url) {
     removeUploadedFileIfExists(existingItem.url);
@@ -1146,68 +1519,78 @@ app.put("/api/items/:id", async (c) => {
     author !== undefined ? String(author || "") : existingItem?.author || "";
 
   db.query(
-    "UPDATE items SET url = ?, title = ?, author = ?, type = ?, notes = ? WHERE id = ?",
-  ).run(url, title || "", nextAuthor, type || "article", notes || "", id);
+    "UPDATE items SET url = ?, title = ?, author = ?, type = ?, notes = ? WHERE id = ? AND user_id = ?",
+  ).run(
+    url,
+    title || "",
+    nextAuthor,
+    type || "article",
+    notes || "",
+    id,
+    currentUser.id,
+  );
 
   db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
-
-  if (tags && Array.isArray(tags)) {
-    for (const tagName of tags) {
-      const trimmed = tagName.trim().toLowerCase();
-      if (!trimmed) continue;
-
-      db.query("INSERT OR IGNORE INTO tags (name) VALUES (?)").run(trimmed);
-      const tag = db
-        .query("SELECT id FROM tags WHERE name = ?")
-        .get(trimmed) as any;
-      db.query("INSERT INTO item_tags (item_id, tag_id) VALUES (?, ?)").run(
-        id,
-        tag.id,
-      );
-    }
-  }
+  attachTagsToItem(id, currentUser.id, tags);
 
   return c.json({ success: true });
 });
 
 app.delete("/api/items/:id", (c) => {
+  const currentUser = getCurrentUser(c);
   const id = c.req.param("id");
-  const item = db.query("SELECT url FROM items WHERE id = ?").get(id) as
-    | { url: string }
-    | undefined;
+  const item = getOwnedItem(id, currentUser.id) as { url: string } | null;
+
+  if (!item) return c.json({ error: "Item not found" }, 404);
 
   if (item?.url) {
     removeUploadedFileIfExists(item.url);
   }
 
   db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
-  db.query("DELETE FROM highlights WHERE item_id = ?").run(id);
-  db.query("DELETE FROM items WHERE id = ?").run(id);
+  db.query("DELETE FROM highlights WHERE item_id = ? AND user_id = ?").run(
+    id,
+    currentUser.id,
+  );
+  db.query("DELETE FROM items WHERE id = ? AND user_id = ?").run(
+    id,
+    currentUser.id,
+  );
   return c.json({ success: true });
 });
 
 // Highlights API
 app.get("/api/highlights", (c) => {
+  const currentUser = getCurrentUser(c);
   const highlights = db
     .query(
       `SELECT h.*, i.title as item_title, i.url as item_url, i.type as item_type
        FROM highlights h
        JOIN items i ON h.item_id = i.id
+       WHERE h.user_id = ? AND i.user_id = ?
        ORDER BY h.created_at DESC`,
     )
-    .all();
+    .all(currentUser.id, currentUser.id);
   return c.json(highlights);
 });
 
 app.get("/api/items/:id/highlights", (c) => {
+  const currentUser = getCurrentUser(c);
   const itemId = c.req.param("id");
+  const item = getOwnedItem(itemId, currentUser.id);
+
+  if (!item) return c.json({ error: "Item not found" }, 404);
+
   const highlights = db
-    .query("SELECT * FROM highlights WHERE item_id = ? ORDER BY created_at ASC")
-    .all(itemId);
+    .query(
+      "SELECT * FROM highlights WHERE item_id = ? AND user_id = ? ORDER BY created_at ASC",
+    )
+    .all(itemId, currentUser.id);
   return c.json(highlights);
 });
 
 app.post("/api/items/:id/highlights", async (c) => {
+  const currentUser = getCurrentUser(c);
   const itemId = c.req.param("id");
   const { selected_text, note } = await c.req.json();
 
@@ -1215,32 +1598,48 @@ app.post("/api/items/:id/highlights", async (c) => {
     return c.json({ error: "Selected text is required" }, 400);
   }
 
+  const item = getOwnedItem(itemId, currentUser.id);
+  if (!item) return c.json({ error: "Item not found" }, 404);
+
   const result = db
     .query(
-      "INSERT INTO highlights (item_id, selected_text, note) VALUES (?, ?, ?)",
+      "INSERT INTO highlights (user_id, item_id, selected_text, note) VALUES (?, ?, ?, ?)",
     )
-    .run(itemId, selected_text, note || "");
+    .run(currentUser.id, itemId, selected_text, note || "");
 
-  const highlight = db
-    .query("SELECT * FROM highlights WHERE id = ?")
-    .get(result.lastInsertRowid);
+  const highlight = getOwnedHighlight(result.lastInsertRowid, currentUser.id);
 
   return c.json(highlight, 201);
 });
 
 app.patch("/api/highlights/:id", async (c) => {
+  const currentUser = getCurrentUser(c);
   const id = c.req.param("id");
   const { note } = await c.req.json();
+  const highlight = getOwnedHighlight(id, currentUser.id);
 
-  db.query("UPDATE highlights SET note = ? WHERE id = ?").run(note || "", id);
+  if (!highlight) return c.json({ error: "Highlight not found" }, 404);
 
-  const highlight = db.query("SELECT * FROM highlights WHERE id = ?").get(id);
-  return c.json(highlight);
+  db.query("UPDATE highlights SET note = ? WHERE id = ? AND user_id = ?").run(
+    note || "",
+    id,
+    currentUser.id,
+  );
+
+  return c.json(getOwnedHighlight(id, currentUser.id));
 });
 
 app.delete("/api/highlights/:id", (c) => {
+  const currentUser = getCurrentUser(c);
   const id = c.req.param("id");
-  db.query("DELETE FROM highlights WHERE id = ?").run(id);
+  const highlight = getOwnedHighlight(id, currentUser.id);
+
+  if (!highlight) return c.json({ error: "Highlight not found" }, 404);
+
+  db.query("DELETE FROM highlights WHERE id = ? AND user_id = ?").run(
+    id,
+    currentUser.id,
+  );
   return c.json({ success: true });
 });
 
