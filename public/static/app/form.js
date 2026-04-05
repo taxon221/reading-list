@@ -150,6 +150,92 @@ async function addPendingUploadFile(app) {
   }
 }
 
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === '"') { inQuotes = true; continue; }
+    if (char === ",") { row.push(current); current = ""; continue; }
+    if (char === "\r") continue;
+
+    if (char === "\n") {
+      row.push(current);
+      if (row.some((c) => c.trim() !== "")) rows.push(row);
+      row = [];
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.length > 0 || row.length > 0) {
+    row.push(current);
+    if (row.some((c) => c.trim() !== "")) rows.push(row);
+  }
+
+  return rows;
+}
+
+function rowsToCsv(rows) {
+  return rows
+    .map((row) =>
+      row
+        .map((cell) => {
+          const s = String(cell ?? "");
+          return s.includes(",") || s.includes('"') || s.includes("\n")
+            ? `"${s.replace(/"/g, '""')}"`
+            : s;
+        })
+        .join(","),
+    )
+    .join("\n");
+}
+
+async function postCsvChunk(csvText) {
+  const blob = new Blob([csvText], { type: "text/csv" });
+  const formData = new FormData();
+  formData.append("file", blob, "chunk.csv");
+
+  const response = await fetch("/api/import/readwise", {
+    method: "POST",
+    body: formData,
+  }).catch(() => null);
+
+  if (!response) throw new Error("Network error — no response from server.");
+  if (handleAuthFailure(response)) return "auth";
+
+  const raw = await response.text();
+  let data = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = {}; }
+
+  if (!response.ok) throw new Error(data.error || "Server error during import.");
+
+  return data;
+}
+
+const IMPORT_CHUNK_SIZE = 200;
+const IMPORT_CHUNK_RETRIES = 2;
+
 function initImport(app) {
   if (!dom.importBtn || !dom.importFile) return;
 
@@ -165,36 +251,75 @@ function initImport(app) {
 
     const originalText = dom.importBtn.textContent;
     dom.importBtn.disabled = true;
-    dom.importBtn.textContent = "Importing...";
+    dom.importBtn.textContent = "Importing…";
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch("/api/import/readwise", {
-        method: "POST",
-        body: formData,
-      }).catch(() => null);
-      if (!response) {
-        alert("Import failed. Please try again.");
+      const text = await file.text();
+      const allRows = parseCsvRows(text);
+
+      if (allRows.length < 2) {
+        alert("CSV appears to be empty or has no data rows.");
         return;
       }
 
-      if (handleAuthFailure(response)) {
-        return;
+      const [headerRow, ...dataRows] = allRows;
+      const chunks = [];
+      for (let i = 0; i < dataRows.length; i += IMPORT_CHUNK_SIZE) {
+        chunks.push(dataRows.slice(i, i + IMPORT_CHUNK_SIZE));
       }
 
-      const data = await response.json();
+      let totalImported = 0;
+      let totalDuplicate = 0;
+      let totalSkipped = 0;
+      let totalErrors = 0;
 
-      if (!response.ok) {
-        alert(data.error || "Import failed.");
-        return;
+      for (let i = 0; i < chunks.length; i++) {
+        if (chunks.length > 1) {
+          dom.importBtn.textContent = `Importing… ${i + 1}/${chunks.length}`;
+        }
+
+        const chunkCsv = rowsToCsv([headerRow, ...chunks[i]]);
+
+        let result = null;
+        let lastErr = null;
+        for (let attempt = 0; attempt <= IMPORT_CHUNK_RETRIES; attempt++) {
+          try {
+            result = await postCsvChunk(chunkCsv);
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+
+        if (result === "auth") return;
+
+        if (!result) {
+          const partial =
+            totalImported > 0
+              ? `\n\n${totalImported} items were imported before the failure. Re-running the full import is safe — already-imported items will be skipped as duplicates.`
+              : "";
+          alert(`Batch ${i + 1}/${chunks.length} failed: ${lastErr?.message || "Unknown error."}${partial}`);
+          if (totalImported > 0) {
+            app.loadItems?.();
+            app.loadTags?.();
+          }
+          return;
+        }
+
+        totalImported += result.imported ?? 0;
+        totalDuplicate += result.duplicate ?? 0;
+        totalSkipped += result.skipped ?? 0;
+        totalErrors += result.errors ?? 0;
       }
 
       alert(
-        `Imported ${data.imported} items. Duplicates: ${data.duplicate}. Skipped: ${data.skipped}. Errors: ${data.errors}.`,
+        `Imported ${totalImported} items. Duplicates: ${totalDuplicate}. Skipped: ${totalSkipped}. Errors: ${totalErrors}.`,
       );
       app.loadItems?.();
       app.loadTags?.();
+    } catch (err) {
+      alert(err?.message || "Import failed. Please try again.");
     } finally {
       dom.importBtn.disabled = false;
       dom.importBtn.textContent = originalText || "Import CSV";
