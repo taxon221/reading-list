@@ -11,15 +11,23 @@ import {
   setupTagInput,
 } from "./utils.js";
 
+const DELETE_TYPE_VALUES = ["article", "video", "pdf", "ebook", "podcast"];
+
+const deleteFacetsData = { tags: [], authors: [], domains: [] };
+let hasLoadedDeleteFacets = false;
+let deleteBy = "tag";
+let deleteSelectedValues = [];
+
 function updateTagFilterDisplay() {
   if (!dom.tagFilterValue) return;
-
-  if (state.selectedTags.length === 0) {
+  const total = state.selectedTags.length + state.excludedTags.length;
+  if (total === 0) {
     dom.tagFilterValue.textContent = "All";
-  } else if (state.selectedTags.length === 1) {
-    dom.tagFilterValue.textContent = state.selectedTags[0];
+  } else if (total === 1) {
+    dom.tagFilterValue.textContent =
+      state.selectedTags[0] ?? `not ${state.excludedTags[0]}`;
   } else {
-    dom.tagFilterValue.textContent = `${state.selectedTags.length} selected`;
+    dom.tagFilterValue.textContent = `${total} selected`;
   }
 }
 
@@ -37,10 +45,20 @@ function updateTypeFilterDisplay() {
   }
 }
 
+function updateTagDropdownState() {
+  dom.tagOptions?.querySelectorAll(".dropdown-option[data-value]").forEach((label) => {
+    const tag = label.dataset.value;
+    const indicator = label.querySelector(".tag-state-indicator");
+    if (!indicator) return;
+    indicator.dataset.state = state.excludedTags.includes(tag)
+      ? "exclude"
+      : state.selectedTags.includes(tag)
+      ? "include"
+      : "off";
+  });
+}
+
 function updateSelectedTags() {
-  state.selectedTags = Array.from(
-    dom.tagOptions?.querySelectorAll('input[type="checkbox"]:checked') || [],
-  ).map((checkbox) => checkbox.value);
   updateTagFilterDisplay();
 }
 
@@ -54,6 +72,7 @@ function updateSelectedTypes() {
 function closeAllDropdowns() {
   dom.typeDropdown?.classList.remove("open");
   dom.tagDropdown?.classList.remove("open");
+  dom.deleteDropdown?.classList.remove("open");
 }
 
 function showView(view) {
@@ -114,10 +133,32 @@ function createItemElement(item) {
   const meta = document.createElement("div");
   meta.className = "item-meta";
 
-  const domain = document.createElement("span");
-  domain.className = "item-domain";
-  domain.textContent = getDomain(item.url);
+    const domainStr = getDomain(item.url);
+  const domain = document.createElement("button");
+  domain.type = "button";
+  domain.className = "item-domain item-filter-btn";
+  domain.textContent = domainStr;
+  domain.title = "Filter by domain · Shift+click to exclude";
+  domain.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (e.shiftKey) toggleExclude("domain", domainStr);
+    else toggleInclude("domain", domainStr);
+  });
   meta.appendChild(domain);
+
+  if (item.author) {
+    const author = document.createElement("button");
+    author.type = "button";
+    author.className = "item-author item-filter-btn";
+    author.textContent = item.author;
+    author.title = "Filter by author · Shift+click to exclude";
+    author.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (e.shiftKey) toggleExclude("author", item.author);
+      else toggleInclude("author", item.author);
+    });
+    meta.appendChild(author);
+  }
 
   if (item.highlight_count) {
     const highlights = document.createElement("span");
@@ -224,15 +265,13 @@ function createItemElement(item) {
 
 function renderItems(items) {
   if (!dom.itemsList) return;
-
   if (items.length === 0) {
     dom.itemsList.replaceChildren(
       createEmptyState("No items yet", "Paste a URL above to get started"),
     );
-    return;
+  } else {
+    dom.itemsList.replaceChildren(...items.map(createItemElement));
   }
-
-  dom.itemsList.replaceChildren(...items.map(createItemElement));
 }
 
 function renderTagOptions(tags) {
@@ -251,39 +290,62 @@ function renderTagOptions(tags) {
     label.className = "dropdown-option";
     label.dataset.value = tag.name;
 
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = tag.name;
-    input.checked = state.selectedTags.includes(tag.name);
+    const indicator = document.createElement("span");
+    indicator.className = "tag-state-indicator";
+    indicator.dataset.state = state.excludedTags.includes(tag.name)
+      ? "exclude"
+      : state.selectedTags.includes(tag.name)
+      ? "include"
+      : "off";
 
     const count = document.createElement("span");
     count.className = "option-count";
     count.textContent = String(tag.count);
 
-    label.append(input, document.createTextNode(`${tag.name} `), count);
+    label.append(indicator, document.createTextNode(`${tag.name} `), count);
+    label.addEventListener("click", (e) => {
+      e.preventDefault();
+      const next = { off: "include", include: "exclude", exclude: "off" };
+      const nextState = next[indicator.dataset.state] ?? "off";
+      indicator.dataset.state = nextState;
+      state.selectedTags = state.selectedTags.filter((t) => t !== tag.name);
+      state.excludedTags = state.excludedTags.filter((t) => t !== tag.name);
+      if (nextState === "include") state.selectedTags.push(tag.name);
+      if (nextState === "exclude") state.excludedTags.push(tag.name);
+      updateTagFilterDisplay();
+      renderFilterChips();
+      loadItems();
+    });
     return label;
   });
 
   dom.tagOptions.replaceChildren(...options);
+}
 
-  dom.tagOptions.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
-    checkbox.addEventListener("change", () => {
-      updateSelectedTags();
-      loadItems();
-    });
-  });
+function applyClientFilters(items) {
+  let result = applySearch(items, state.searchQuery);
+  if (state.selectedDomains.length > 0)
+    result = result.filter((i) => state.selectedDomains.includes(getDomain(i.url)));
+  if (state.excludedDomains.length > 0)
+    result = result.filter((i) => !state.excludedDomains.includes(getDomain(i.url)));
+  if (state.selectedAuthors.length > 0)
+    result = result.filter((i) =>
+      state.selectedAuthors.some((a) => (i.author || "").toLowerCase() === a.toLowerCase()),
+    );
+  if (state.excludedAuthors.length > 0)
+    result = result.filter((i) =>
+      !state.excludedAuthors.some((a) => (i.author || "").toLowerCase() === a.toLowerCase()),
+    );
+  return result;
 }
 
 async function loadItems() {
   if (state.isUnauthorized) return;
 
   const params = new URLSearchParams();
-  if (state.selectedTags.length > 0) {
-    params.set("tags", state.selectedTags.join(","));
-  }
-  if (state.selectedTypes.length > 0) {
-    params.set("types", state.selectedTypes.join(","));
-  }
+  if (state.selectedTags.length > 0) params.set("tags", state.selectedTags.join(","));
+  if (state.excludedTags.length > 0) params.set("exclude_tags", state.excludedTags.join(","));
+  if (state.selectedTypes.length > 0) params.set("types", state.selectedTypes.join(","));
 
   const url = `/api/items${params.toString() ? `?${params.toString()}` : ""}`;
   const response = await fetch(url).catch(() => null);
@@ -293,7 +355,7 @@ async function loadItems() {
 
   const items = await response.json();
   state.itemsById = new Map(items.map((item) => [Number(item.id), item]));
-  renderItems(applySearch(items, state.searchQuery));
+  renderItems(applyClientFilters(items));
 }
 
 async function loadTags() {
@@ -305,20 +367,314 @@ async function loadTags() {
   if (!response.ok) return;
 
   const tags = await response.json();
+  hasLoadedDeleteFacets = false;
   renderTagOptions(tags);
   updateTagFilterDisplay();
 }
 
+function toggleInclude(type, value) {
+  const selected = `selected${type.charAt(0).toUpperCase() + type.slice(1)}s`;
+  const excluded = `excluded${type.charAt(0).toUpperCase() + type.slice(1)}s`;
+  if (state[selected].includes(value)) {
+    state[selected] = state[selected].filter((v) => v !== value);
+  } else {
+    state[selected] = [...state[selected], value];
+    state[excluded] = state[excluded].filter((v) => v !== value);
+  }
+  renderFilterChips();
+  if (type === "domain" || type === "author") {
+    renderItems(applyClientFilters(Array.from(state.itemsById.values())));
+  } else {
+    loadItems();
+  }
+}
+
+function toggleExclude(type, value) {
+  const selected = `selected${type.charAt(0).toUpperCase() + type.slice(1)}s`;
+  const excluded = `excluded${type.charAt(0).toUpperCase() + type.slice(1)}s`;
+  if (state[excluded].includes(value)) {
+    state[excluded] = state[excluded].filter((v) => v !== value);
+  } else {
+    state[excluded] = [...state[excluded], value];
+    state[selected] = state[selected].filter((v) => v !== value);
+  }
+  renderFilterChips();
+  if (type === "domain" || type === "author") {
+    renderItems(applyClientFilters(Array.from(state.itemsById.values())));
+  } else {
+    loadItems();
+  }
+}
+
 function filterByTag(tag) {
   if (state.selectedTags.includes(tag)) return;
-
   state.selectedTags = [...state.selectedTags, tag];
-  const checkbox = Array.from(
-    dom.tagOptions?.querySelectorAll('input[type="checkbox"]') || [],
-  ).find((input) => input.value === tag);
-  if (checkbox) checkbox.checked = true;
+  state.excludedTags = state.excludedTags.filter((t) => t !== tag);
+  updateTagDropdownState();
   updateTagFilterDisplay();
+  renderFilterChips();
   loadItems();
+}
+
+function createFilterChip(text, onRemove, isExclude) {
+  const chip = document.createElement("span");
+  chip.className = isExclude ? "filter-chip filter-chip-exclude" : "filter-chip";
+  const label = document.createElement("span");
+  label.textContent = text;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "filter-chip-remove";
+  btn.textContent = "×";
+  btn.addEventListener("click", onRemove);
+  chip.append(label, btn);
+  return chip;
+}
+
+function renderFilterChips() {
+  if (!dom.filterChips) return;
+  const chips = [];
+
+  for (const tag of state.selectedTags) {
+    chips.push(createFilterChip(`#${tag}`, () => {
+      state.selectedTags = state.selectedTags.filter((t) => t !== tag);
+      updateTagDropdownState();
+      updateTagFilterDisplay();
+      renderFilterChips();
+      loadItems();
+    }, false));
+  }
+  for (const tag of state.excludedTags) {
+    chips.push(createFilterChip(`not #${tag}`, () => {
+      state.excludedTags = state.excludedTags.filter((t) => t !== tag);
+      updateTagDropdownState();
+      updateTagFilterDisplay();
+      renderFilterChips();
+      loadItems();
+    }, true));
+  }
+  for (const d of state.selectedDomains) {
+    chips.push(createFilterChip(d, () => {
+      state.selectedDomains = state.selectedDomains.filter((v) => v !== d);
+      renderFilterChips();
+      renderItems(applyClientFilters(Array.from(state.itemsById.values())));
+    }, false));
+  }
+  for (const d of state.excludedDomains) {
+    chips.push(createFilterChip(`not ${d}`, () => {
+      state.excludedDomains = state.excludedDomains.filter((v) => v !== d);
+      renderFilterChips();
+      renderItems(applyClientFilters(Array.from(state.itemsById.values())));
+    }, true));
+  }
+  for (const a of state.selectedAuthors) {
+    chips.push(createFilterChip(`by ${a}`, () => {
+      state.selectedAuthors = state.selectedAuthors.filter((v) => v !== a);
+      renderFilterChips();
+      renderItems(applyClientFilters(Array.from(state.itemsById.values())));
+    }, false));
+  }
+  for (const a of state.excludedAuthors) {
+    chips.push(createFilterChip(`not by ${a}`, () => {
+      state.excludedAuthors = state.excludedAuthors.filter((v) => v !== a);
+      renderFilterChips();
+      renderItems(applyClientFilters(Array.from(state.itemsById.values())));
+    }, true));
+  }
+
+  dom.filterChips.replaceChildren(...chips);
+  dom.filterChips.style.display = chips.length ? "" : "none";
+}
+
+function getDeleteChoices() {
+  if (deleteBy === "tag") return (deleteFacetsData.tags || []).map((tag) => tag.name);
+  if (deleteBy === "author") return deleteFacetsData.authors || [];
+  if (deleteBy === "domain") return deleteFacetsData.domains || [];
+  return DELETE_TYPE_VALUES;
+}
+
+function formatDeleteChoice(value) {
+  if (deleteBy !== "type") return value;
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function renderDeleteByOptions() {
+  dom.deleteByOptions?.querySelectorAll("[data-delete-by]").forEach((option) => {
+    option.classList.toggle("is-active", option.dataset.deleteBy === deleteBy);
+  });
+}
+
+function renderDeleteValueOptions() {
+  if (!dom.deleteValueOptions || !dom.deleteValueTextInput) return;
+
+  const query = dom.deleteValueTextInput.value.trim().toLowerCase();
+  const values = getDeleteChoices().filter((value) =>
+    formatDeleteChoice(value).toLowerCase().includes(query),
+  );
+
+  if (values.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "dropdown-empty";
+    empty.textContent = "No matches";
+    dom.deleteValueOptions.replaceChildren(empty);
+    return;
+  }
+
+  const options = values.map((value) => {
+    const label = document.createElement("label");
+    label.className = "dropdown-option delete-value-option";
+    label.dataset.deleteValue = value;
+    label.classList.toggle("is-active", deleteSelectedValues.includes(value));
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = value;
+    checkbox.checked = deleteSelectedValues.includes(value);
+
+    label.append(checkbox, document.createTextNode(formatDeleteChoice(value)));
+    return label;
+  });
+
+  dom.deleteValueOptions.replaceChildren(...options);
+}
+
+function updateDeleteValueUi() {
+  if (!dom.deleteValueTextInput) return;
+  if (deleteBy === "domain") dom.deleteValueTextInput.placeholder = "Search websites...";
+  else if (deleteBy === "author") dom.deleteValueTextInput.placeholder = "Search authors...";
+  else if (deleteBy === "tag") dom.deleteValueTextInput.placeholder = "Search tags...";
+  else dom.deleteValueTextInput.placeholder = "Search types...";
+  renderDeleteByOptions();
+  renderDeleteValueOptions();
+}
+
+function getDeleteFormValue() {
+  const typed = (dom.deleteValueTextInput?.value || "").trim();
+  if (deleteSelectedValues.length > 0) return [...deleteSelectedValues];
+  if (!typed) return [];
+  if (deleteBy === "type") return [typed.toLowerCase()];
+  return [typed];
+}
+
+function clearDeleteForm() {
+  deleteBy = "tag";
+  deleteSelectedValues = [];
+  if (dom.deleteValueTextInput) dom.deleteValueTextInput.value = "";
+  updateDeleteValueUi();
+}
+
+async function loadDeleteFacets() {
+  if (hasLoadedDeleteFacets) return;
+
+  const [tagsRes, facetsRes] = await Promise.all([
+    fetch("/api/tags").catch(() => null),
+    fetch("/api/items/facets").catch(() => null),
+  ]);
+  if (tagsRes?.ok) deleteFacetsData.tags = await tagsRes.json();
+  if (facetsRes?.ok) {
+    const f = await facetsRes.json();
+    deleteFacetsData.authors = f.authors || [];
+    deleteFacetsData.domains = f.domains || [];
+  }
+
+  hasLoadedDeleteFacets = true;
+  updateDeleteValueUi();
+}
+
+async function openDeleteDropdown() {
+  if (state.isUnauthorized) return;
+  await loadDeleteFacets();
+  const isOpen = dom.deleteDropdown?.classList.contains("open");
+  closeAllDropdowns();
+  if (isOpen) return;
+  dom.deleteDropdown?.classList.add("open");
+  dom.deleteValueTextInput?.focus();
+}
+
+async function confirmDeleteItems() {
+  if (state.isUnauthorized) return;
+  const by = deleteBy;
+  const values = getDeleteFormValue();
+  if (!by || values.length === 0) {
+    alert("Choose at least one value.");
+    return;
+  }
+  const preview =
+    values.length === 1
+      ? `"${formatDeleteChoice(values[0])}"`
+      : `${values.length} selected values`;
+  if (!confirm(`Delete all items where ${by} matches ${preview}? This cannot be undone.`)) return;
+
+  const response = await fetch("/api/items/delete-by", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ by, values }),
+  }).catch(() => null);
+  if (!response) {
+    alert("Delete failed.");
+    return;
+  }
+  if (handleAuthFailure(response)) return;
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+  if (!response.ok) {
+    alert(data.error || "Delete failed.");
+    return;
+  }
+
+  hasLoadedDeleteFacets = false;
+  clearDeleteForm();
+  closeAllDropdowns();
+  alert(data.deleted ? `Deleted ${data.deleted} item(s).` : "No matching items.");
+  loadItems();
+  loadTags();
+}
+
+function initDeleteDropdown() {
+  dom.deleteFilterBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void openDeleteDropdown();
+  });
+  dom.deleteConfirm?.addEventListener("click", () => {
+    void confirmDeleteItems();
+  });
+  dom.deleteClear?.addEventListener("click", () => {
+    clearDeleteForm();
+  });
+  dom.deleteByOptions?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-delete-by]");
+    if (!option) return;
+    deleteBy = option.dataset.deleteBy || "tag";
+    deleteSelectedValues = [];
+    if (dom.deleteValueTextInput) dom.deleteValueTextInput.value = "";
+    updateDeleteValueUi();
+    dom.deleteValueTextInput?.focus();
+  });
+  dom.deleteValueOptions?.addEventListener("change", (event) => {
+    const input = event.target.closest('input[type="checkbox"]');
+    if (!input) return;
+    const value = input.value;
+    if (input.checked) {
+      if (!deleteSelectedValues.includes(value)) {
+        deleteSelectedValues = [...deleteSelectedValues, value];
+      }
+    } else {
+      deleteSelectedValues = deleteSelectedValues.filter((item) => item !== value);
+    }
+    renderDeleteValueOptions();
+  });
+  dom.deleteValueTextInput?.addEventListener("input", () => {
+    renderDeleteValueOptions();
+  });
+  dom.deleteValueTextInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void confirmDeleteItems();
+    }
+  });
 }
 
 function openItemMenu(button, id, url) {
@@ -472,11 +828,11 @@ function initDropdowns() {
   });
 
   dom.tagClear?.addEventListener("click", () => {
-    dom.tagOptions?.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
-      checkbox.checked = false;
-    });
     state.selectedTags = [];
+    state.excludedTags = [];
+    updateTagDropdownState();
     updateTagFilterDisplay();
+    renderFilterChips();
     loadItems();
   });
 }
@@ -488,7 +844,9 @@ function initSearch() {
   dom.searchInput.addEventListener("input", (event) => {
     state.searchQuery = event.target.value || "";
     clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(loadItems, 120);
+    searchDebounce = setTimeout(() => {
+      renderItems(applyClientFilters(Array.from(state.itemsById.values())));
+    }, 120);
   });
 }
 
@@ -623,4 +981,6 @@ export function initList(app) {
   initEditModal();
   updateSelectedTypes();
   updateSelectedTags();
+
+  initDeleteDropdown();
 }

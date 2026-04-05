@@ -13,6 +13,11 @@ export const state = {
   },
   selectedTypes: [],
   selectedTags: [],
+  excludedTags: [],
+  selectedDomains: [],
+  excludedDomains: [],
+  selectedAuthors: [],
+  excludedAuthors: [],
   pendingTags: [],
   editTags: [],
   fetchedMeta: null,
@@ -106,6 +111,14 @@ export const dom = {
   notesList: byId("notes-list"),
   importBtn: byId("import-btn"),
   importFile: byId("import-file"),
+  deleteDropdown: byId("delete-dropdown"),
+  deleteFilterBtn: byId("delete-filter-btn"),
+  deleteByOptions: byId("delete-by-options"),
+  deleteValueTextInput: byId("delete-value-text"),
+  deleteValueOptions: byId("delete-value-options"),
+  deleteClear: byId("delete-clear"),
+  deleteConfirm: byId("delete-confirm"),
+  filterChips: byId("filter-chips"),
   accountEntry: byId("account-entry"),
   accountButton: byId("account-button"),
   accountModalOverlay: byId("account-modal-overlay"),
@@ -515,6 +528,10 @@ export function showUnauthorizedState(
 
   if (dom.importBtn) {
     dom.importBtn.disabled = true;
+  }
+
+  if (dom.deleteFilterBtn) {
+    dom.deleteFilterBtn.disabled = true;
   }
 
   if (dom.itemsList) {

@@ -282,6 +282,22 @@ function getOwnedItem(id: string | number | bigint, userId: number) {
     .get(id, userId) as ItemRow | undefined) || null;
 }
 
+function deleteOwnedItem(currentUser: CurrentUser, id: number): boolean {
+  const item = getOwnedItem(id, currentUser.id) as { url: string } | null;
+  if (!item) return false;
+  if (item.url) removeUploadedFileIfExists(item.url);
+  db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
+  db.query("DELETE FROM highlights WHERE item_id = ? AND user_id = ?").run(
+    id,
+    currentUser.id,
+  );
+  db.query("DELETE FROM items WHERE id = ? AND user_id = ?").run(
+    id,
+    currentUser.id,
+  );
+  return true;
+}
+
 function getOwnedHighlight(id: string | number | bigint, userId: number) {
   return (db
     .query("SELECT * FROM highlights WHERE id = ? AND user_id = ?")
@@ -1397,9 +1413,11 @@ app.post("/api/import/file", async (c) => {
 app.get("/api/items", (c) => {
   const currentUser = getCurrentUser(c);
   const tagsParam = c.req.query("tags");
+  const excludeTagsParam = c.req.query("exclude_tags");
   const typesParam = c.req.query("types");
 
   const tags = tagsParam ? tagsParam.split(",").filter(Boolean) : [];
+  const excludeTags = excludeTagsParam ? excludeTagsParam.split(",").filter(Boolean) : [];
   const types = typesParam ? typesParam.split(",").filter(Boolean) : [];
 
   let query = "SELECT * FROM items WHERE user_id = ?";
@@ -1417,6 +1435,19 @@ app.get("/api/items", (c) => {
     );
     params.push(currentUser.id);
     params.push(...tags);
+  }
+
+  if (excludeTags.length > 0) {
+    const placeholders = excludeTags.map(() => "?").join(",");
+    conditions.push(
+      `id NOT IN (
+        SELECT it.item_id FROM item_tags it
+        JOIN tags t ON it.tag_id = t.id
+        WHERE t.user_id = ? AND t.name IN (${placeholders})
+      )`,
+    );
+    params.push(currentUser.id);
+    params.push(...excludeTags);
   }
 
   if (types.length > 0) {
@@ -1449,6 +1480,31 @@ app.get("/api/items", (c) => {
   });
 
   return c.json(itemsWithTags);
+});
+
+app.get("/api/items/facets", (c) => {
+  const currentUser = getCurrentUser(c);
+  const rows = db
+    .query("SELECT url, author FROM items WHERE user_id = ?")
+    .all(currentUser.id) as { url: string; author: string }[];
+
+  const authors = new Set<string>();
+  const domains = new Set<string>();
+  for (const row of rows) {
+    const a = (row.author || "").trim();
+    if (a) authors.add(a);
+    try {
+      const host = new URL(row.url).hostname.replace(/^www\./i, "").toLowerCase();
+      if (host) domains.add(host);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return c.json({
+    authors: [...authors].sort((x, y) => x.localeCompare(y)),
+    domains: [...domains].sort((x, y) => x.localeCompare(y)),
+  });
 });
 
 app.get("/api/tags", (c) => {
@@ -1605,26 +1661,95 @@ app.put("/api/items/:id", async (c) => {
   return c.json({ success: true });
 });
 
+app.post("/api/items/delete-by", async (c) => {
+  const currentUser = getCurrentUser(c);
+  const body = await c.req.json().catch(() => null);
+  const by = typeof body?.by === "string" ? body.by.trim().toLowerCase() : "";
+  const values = Array.isArray(body?.values)
+    ? body.values
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    : typeof body?.value === "string"
+      ? [body.value.trim()].filter(Boolean)
+      : [];
+  if (values.length === 0) return c.json({ error: "At least one value is required" }, 400);
+
+  let ids: number[] = [];
+
+  if (by === "tag") {
+    const placeholders = values.map(() => "?").join(",");
+    const rows = db
+      .query(
+        `
+          SELECT DISTINCT i.id AS id FROM items i
+          INNER JOIN item_tags it ON it.item_id = i.id
+          INNER JOIN tags t ON t.id = it.tag_id AND t.user_id = i.user_id
+          WHERE i.user_id = ? AND t.name IN (${placeholders})
+        `,
+      )
+      .all(currentUser.id, ...values) as { id: number }[];
+    ids = rows.map((r) => r.id);
+  } else if (by === "author") {
+    const normalizedValues = values.map((value) => value.toLowerCase());
+    const placeholders = normalizedValues.map(() => "?").join(",");
+    const rows = db
+      .query(
+        `SELECT id FROM items WHERE user_id = ? AND lower(trim(author)) IN (${placeholders})`,
+      )
+      .all(currentUser.id, ...normalizedValues) as { id: number }[];
+    ids = rows.map((r) => r.id);
+  } else if (by === "type") {
+    const placeholders = values.map(() => "?").join(",");
+    const rows = db
+      .query(`SELECT id FROM items WHERE user_id = ? AND type IN (${placeholders})`)
+      .all(currentUser.id, ...values) as { id: number }[];
+    ids = rows.map((r) => r.id);
+  } else if (by === "domain") {
+    const needles = new Set(
+      values.map((value) => value.replace(/^www\./i, "").toLowerCase()),
+    );
+    const rows = db
+      .query("SELECT id, url FROM items WHERE user_id = ?")
+      .all(currentUser.id) as { id: number; url: string }[];
+    ids = rows
+      .filter((r) => {
+        try {
+          const host = new URL(r.url).hostname.replace(/^www\./i, "").toLowerCase();
+          for (const needle of needles) {
+            if (host === needle || host.endsWith(`.${needle}`)) return true;
+          }
+          return false;
+        } catch {
+          return false;
+        }
+      })
+      .map((r) => r.id);
+  } else {
+    return c.json({ error: "by must be tag, author, domain, or type" }, 400);
+  }
+
+  const deleteTx = db.transaction((itemIds: number[]) => {
+    let deleted = 0;
+    for (const id of itemIds) {
+      if (deleteOwnedItem(currentUser, id)) deleted++;
+    }
+    return deleted;
+  });
+
+  const deleted = deleteTx(ids);
+  return c.json({ success: true, deleted });
+});
+
 app.delete("/api/items/:id", (c) => {
   const currentUser = getCurrentUser(c);
   const id = c.req.param("id");
-  const item = getOwnedItem(id, currentUser.id) as { url: string } | null;
-
-  if (!item) return c.json({ error: "Item not found" }, 404);
-
-  if (item?.url) {
-    removeUploadedFileIfExists(item.url);
+  const numericId = Number(id);
+  if (!Number.isFinite(numericId)) {
+    return c.json({ error: "Item not found" }, 404);
   }
-
-  db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
-  db.query("DELETE FROM highlights WHERE item_id = ? AND user_id = ?").run(
-    id,
-    currentUser.id,
-  );
-  db.query("DELETE FROM items WHERE id = ? AND user_id = ?").run(
-    id,
-    currentUser.id,
-  );
+  if (!deleteOwnedItem(currentUser, numericId)) {
+    return c.json({ error: "Item not found" }, 404);
+  }
   return c.json({ success: true });
 });
 

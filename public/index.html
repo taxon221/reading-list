@@ -206,7 +206,8 @@
                     />
                 </section>
                 <section class="filters">
-                    <div class="filter-dropdown" id="type-dropdown">
+                    <div class="filters-row">
+                        <div class="filter-dropdown" id="type-dropdown">
                         <button
                             type="button"
                             class="filter-btn"
@@ -273,43 +274,115 @@
                         </div>
                     </div>
 
-                    <div class="filter-dropdown" id="tag-dropdown">
-                        <button
-                            type="button"
-                            class="filter-btn"
-                            id="tag-filter-btn"
-                        >
-                            <span class="filter-label">Tags</span>
-                            <span class="filter-value" id="tag-filter-value"
-                                >All</span
+                        <div class="filter-dropdown" id="tag-dropdown">
+                            <button
+                                type="button"
+                                class="filter-btn"
+                                id="tag-filter-btn"
                             >
-                            <span class="filter-arrow">▾</span>
-                        </button>
-                        <div class="dropdown-menu" id="tag-menu">
-                            <div class="dropdown-search">
-                                <input
-                                    type="text"
-                                    placeholder="Search tags..."
-                                    id="tag-search"
-                                    autocomplete="off"
-                                />
-                            </div>
-                            <div
-                                class="dropdown-options"
-                                id="tag-options"
-                            ></div>
-                            <div class="dropdown-actions">
-                                <button
-                                    type="button"
-                                    class="dropdown-clear"
-                                    id="tag-clear"
+                                <span class="filter-label">Tags</span>
+                                <span class="filter-value" id="tag-filter-value"
+                                    >All</span
                                 >
-                                    Clear
-                                </button>
+                                <span class="filter-arrow">▾</span>
+                            </button>
+                            <div class="dropdown-menu" id="tag-menu">
+                                <div class="dropdown-search">
+                                    <input
+                                        type="text"
+                                        placeholder="Search tags..."
+                                        id="tag-search"
+                                        autocomplete="off"
+                                    />
+                                </div>
+                                <div
+                                    class="dropdown-options"
+                                    id="tag-options"
+                                ></div>
+                                <div class="dropdown-actions">
+                                    <button
+                                        type="button"
+                                        class="dropdown-clear"
+                                        id="tag-clear"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="filter-dropdown" id="delete-dropdown">
+                            <button
+                                type="button"
+                                class="filter-btn delete-filter-btn"
+                                id="delete-filter-btn"
+                            >
+                                <span class="filter-label">Delete all</span>
+                                <span class="filter-arrow">▾</span>
+                            </button>
+                            <div class="dropdown-menu delete-menu" id="delete-menu">
+                                <div class="delete-dropdown-heading">Match</div>
+                                <div class="dropdown-options delete-by-options" id="delete-by-options">
+                                    <button
+                                        type="button"
+                                        class="dropdown-option delete-choice-option"
+                                        data-delete-by="tag"
+                                    >
+                                        Tag
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="dropdown-option delete-choice-option"
+                                        data-delete-by="author"
+                                    >
+                                        Author
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="dropdown-option delete-choice-option"
+                                        data-delete-by="domain"
+                                    >
+                                        Website
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="dropdown-option delete-choice-option"
+                                        data-delete-by="type"
+                                    >
+                                        Type
+                                    </button>
+                                </div>
+                                <div class="delete-dropdown-heading">Value</div>
+                                <div class="dropdown-search delete-dropdown-search">
+                                    <input
+                                        type="text"
+                                        id="delete-value-text"
+                                        list="delete-value-suggestions"
+                                        autocomplete="off"
+                                    />
+                                </div>
+                                <div class="dropdown-options delete-value-options" id="delete-value-options"></div>
+                                <div class="dropdown-actions delete-dropdown-actions">
+                                    <button
+                                        type="button"
+                                        class="dropdown-clear"
+                                        id="delete-clear"
+                                    >
+                                        Clear
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn-danger delete-confirm-btn"
+                                        id="delete-confirm"
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </section>
+
+                <div class="filter-chips" id="filter-chips" style="display:none"></div>
 
                 <section class="items-list" id="items-list"></section>
             </div>
