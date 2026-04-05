@@ -248,6 +248,7 @@ function closeAccountModal() {
   if (!dom.accountButton || !dom.accountModalOverlay) return;
   dom.accountButton.setAttribute("aria-expanded", "false");
   dom.accountModalOverlay.hidden = true;
+  dom.accountModalOverlay.style.display = "";
   document.body.classList.remove("account-modal-open");
 }
 
@@ -255,31 +256,78 @@ function openAccountModal() {
   if (!dom.accountButton || !dom.accountModalOverlay) return;
   dom.accountButton.setAttribute("aria-expanded", "true");
   dom.accountModalOverlay.hidden = false;
+  dom.accountModalOverlay.style.display = "flex";
   document.body.classList.add("account-modal-open");
   dom.accountModalClose?.focus();
+}
+
+function createGuestAccountIconSvg() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "account-icon-guest");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "22");
+  svg.setAttribute("height", "22");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2");
+
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("cx", "12");
+  circle.setAttribute("cy", "7");
+  circle.setAttribute("r", "4");
+
+  svg.append(path, circle);
+  return svg;
 }
 
 function renderAccountButton() {
   if (!dom.accountButton) return;
 
   const user = state.authUi.currentUser;
-  const isSignedIn = Boolean(user && !state.isUnauthorized);
-  const avatarText = isSignedIn
-    ? (user.displayName || user.email || "A").trim().charAt(0).toUpperCase()
-    : "A";
-  const label = isSignedIn
-    ? `Account for ${user.displayName || user.email}`
+  const hasUser = Boolean(user);
+  const rawInitial = hasUser
+    ? (user.displayName || user.email || "").trim().charAt(0)
+    : "";
+  const avatarText = rawInitial ? rawInitial.toUpperCase() : "";
+  const label = hasUser
+    ? state.isUnauthorized
+      ? `Account (${user.displayName || user.email}) — list API blocked`
+      : `Account for ${user.displayName || user.email}`
     : state.isUnauthorized
       ? "Guest account"
       : "Account";
 
   dom.accountButton.title = label;
   dom.accountButton.setAttribute("aria-label", label);
-  dom.accountButton.dataset.state = isSignedIn ? "signed-in" : "guest";
-  dom.accountButton.textContent = avatarText || "A";
+  dom.accountButton.dataset.state = !hasUser
+    ? "guest"
+    : state.isUnauthorized
+      ? "unauthorized"
+      : "signed-in";
+  dom.accountButton.replaceChildren();
+
+  if (hasUser && avatarText) {
+    dom.accountButton.textContent = avatarText;
+    return;
+  }
+
+  if (hasUser) {
+    dom.accountButton.textContent = "?";
+    return;
+  }
+
+  dom.accountButton.appendChild(createGuestAccountIconSvg());
 }
 
 function renderAccountModal() {
+  renderAccountButton();
+
   const {
     accountEntry,
     accountButton,
@@ -311,18 +359,25 @@ function renderAccountModal() {
   }
 
   const user = state.authUi.currentUser;
-  const signedIn = Boolean(user && !state.isUnauthorized);
-  renderAccountButton();
+  const hasUser = Boolean(user);
 
-  if (signedIn) {
+  if (hasUser) {
     accountEntry.hidden = false;
     accountPanelUser.hidden = false;
     accountPanelGuest.hidden = true;
 
-    accountTitle.textContent = user.isAdmin ? "Admin account" : "Signed in";
+    accountTitle.textContent = state.isUnauthorized
+      ? "Signed in — reading list blocked"
+      : user.isAdmin
+        ? "Admin account"
+        : "Signed in";
     accountEmail.textContent = user.email;
-    const mode = state.authUi.authMode || "unknown";
-    accountMeta.textContent = `Sign-in method: ${mode}`;
+    if (state.isUnauthorized) {
+      accountMeta.textContent = state.authMessage;
+    } else {
+      const mode = state.authUi.authMode || "unknown";
+      accountMeta.textContent = `Sign-in method: ${mode}`;
+    }
     accountMeta.hidden = false;
 
     const actionHref = state.authUi.switchAccountUrl || state.authUi.logoutUrl;
@@ -372,7 +427,9 @@ function renderAccountModal() {
 }
 
 export async function loadAuthUi() {
-  const response = await fetch("/api/auth/info").catch(() => null);
+  const response = await fetch("/api/auth/info", {
+    credentials: "same-origin",
+  }).catch(() => null);
   if (!response?.ok) {
     if (dom.accountEntry) dom.accountEntry.hidden = false;
     state.authUi.currentUser = null;
@@ -380,7 +437,16 @@ export async function loadAuthUi() {
     return;
   }
 
-  const data = await response.json();
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    if (dom.accountEntry) dom.accountEntry.hidden = false;
+    state.authUi.currentUser = null;
+    renderAccountModal();
+    return;
+  }
+
   state.isUnauthorized = false;
   state.authUi.authMode = data?.authMode || "";
   state.authUi.publicAppUrl = data?.publicAppUrl || "";

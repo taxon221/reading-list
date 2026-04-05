@@ -6,7 +6,12 @@
         <meta name="description" content="Personal reading list manager" />
         <meta name="theme-color" content="#111111" />
         <title>Reading List</title>
-        <link rel="manifest" href="/manifest.webmanifest" />
+        <!-- use-credentials: required behind Cloudflare Access so the manifest fetch sends cookies and stays same-origin (avoids CORS on redirects to cloudflareaccess.com). -->
+        <link
+            rel="manifest"
+            href="/manifest.webmanifest"
+            crossorigin="use-credentials"
+        />
         <link rel="apple-touch-icon" href="/static/icon-180.png" />
         <link
             rel="icon"
@@ -34,7 +39,26 @@
                             aria-haspopup="dialog"
                             aria-controls="account-modal"
                             title="Account"
-                        >A</button>
+                            aria-label="Account"
+                        >
+                            <svg
+                                class="account-icon-guest"
+                                viewBox="0 0 24 24"
+                                width="22"
+                                height="22"
+                                aria-hidden="true"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path
+                                    d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"
+                                ></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                        </button>
                     </div>
                     <button type="button" class="import-btn" id="import-btn">
                         Import CSV

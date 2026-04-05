@@ -67,6 +67,9 @@ app.use("/*", async (c, next) => {
     path.endsWith(".css")
   ) {
     c.header("Cache-Control", "no-store, max-age=0");
+    // CDN-Cache-Control tells Cloudflare (and other CDNs) not to cache at the edge,
+    // even if a "Cache Everything" rule is configured.
+    c.header("CDN-Cache-Control", "no-store");
   }
 });
 app.use("/static/*", serveStatic({ root: "./public" }));
@@ -149,9 +152,32 @@ function isLoopbackHostname(hostname: string): boolean {
   );
 }
 
+/** Public browser origin when the app is reached via reverse proxy (Bun URL is loopback). */
+function getForwardedPublicOrigin(c: Context<AppBindings>): string {
+  const rawProto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim();
+  const rawHost = c.req.header("x-forwarded-host")?.split(",")[0]?.trim();
+  if (!rawProto || !rawHost) return "";
+
+  const proto = rawProto.toLowerCase();
+  if (proto !== "http" && proto !== "https") return "";
+
+  const host = rawHost.toLowerCase();
+  if (!host || host.includes("/") || host.includes(" ")) return "";
+
+  return `${proto}://${host}`;
+}
+
 function getAuthRouteBase(c: Context<AppBindings>): string {
+  if (publicAppUrl) return publicAppUrl;
+
   const requestUrl = new URL(c.req.url);
-  return publicAppUrl || (isLoopbackHostname(requestUrl.hostname) ? "" : requestUrl.origin);
+  if (isLoopbackHostname(requestUrl.hostname)) {
+    const forwarded = getForwardedPublicOrigin(c);
+    if (forwarded) return forwarded;
+    return "";
+  }
+
+  return requestUrl.origin;
 }
 
 function getAppLogoutTarget(c: Context<AppBindings>): string {

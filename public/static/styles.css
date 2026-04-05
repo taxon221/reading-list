@@ -149,9 +149,23 @@ header h1 {
     background: var(--accent);
 }
 
+/* Identity known from /api/auth/info but a data API returned 401/403 (race or misconfiguration). */
+.account-icon-btn[data-state="unauthorized"] {
+    color: #fff;
+    border-color: var(--danger);
+    background: var(--accent);
+}
+
 .account-icon-btn[data-state="guest"] {
     color: #fff;
-    background: color-mix(in srgb, var(--accent) 86%, #0f172a);
+    /* Solid fill: avoids broken styling where `color-mix` is unsupported (older WebKit). */
+    background: #2563eb;
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.account-icon-btn .account-icon-guest {
+    display: block;
+    flex-shrink: 0;
 }
 
 .account-icon-btn:active {
