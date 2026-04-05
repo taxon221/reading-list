@@ -55,6 +55,20 @@ const app = new Hono<AppBindings>();
 initDb();
 
 app.use("/*", cors());
+app.use("/*", async (c, next) => {
+  await next();
+
+  const path = c.req.path;
+  if (
+    path === "/" ||
+    path === "/manifest.webmanifest" ||
+    path === "/pdf-reader.html" ||
+    path.endsWith(".js") ||
+    path.endsWith(".css")
+  ) {
+    c.header("Cache-Control", "no-store, max-age=0");
+  }
+});
 app.use("/static/*", serveStatic({ root: "./public" }));
 app.get(
   "/manifest.webmanifest",
@@ -63,6 +77,15 @@ app.get(
 app.get("/pdf-reader.html", serveStatic({ path: "./public/pdf-reader.html" }));
 app.get("/", serveStatic({ path: "./public/index.html" }));
 app.get("/api/auth/info", async (c) => c.json(await getAuthUiUrls(c)));
+app.get("/auth/logout", (c) => {
+  const target = getAppLogoutTarget(c) || getAuthRouteBase(c) || "/";
+  return c.redirect(target);
+});
+app.get("/auth/switch", (c) => {
+  const target =
+    getSwitchAccountTarget(c) || getAppLogoutTarget(c) || getAuthRouteBase(c) || "/";
+  return c.redirect(target);
+});
 
 app.use("/api/*", async (c, next) => {
   const { status, user } = await resolveRequestUser(c);
@@ -126,25 +149,34 @@ function isLoopbackHostname(hostname: string): boolean {
   );
 }
 
-async function getAuthUiUrls(c: Context<AppBindings>) {
+function getAuthRouteBase(c: Context<AppBindings>): string {
   const requestUrl = new URL(c.req.url);
-  const origin = requestUrl.origin;
-  const loginUrl =
-    publicAppUrl || (isLoopbackHostname(requestUrl.hostname) ? "" : origin);
-  const appLogoutBase =
-    publicAppUrl || (isLoopbackHostname(requestUrl.hostname) ? "" : origin);
-  const switchAccountUrl =
-    getConfiguredAuthMode() === "cloudflare" && cloudflareAccessTeamDomain
-      ? `${cloudflareAccessTeamDomain}/cdn-cgi/access/logout`
-      : "";
+  return publicAppUrl || (isLoopbackHostname(requestUrl.hostname) ? "" : requestUrl.origin);
+}
+
+function getAppLogoutTarget(c: Context<AppBindings>): string {
+  const authRouteBase = getAuthRouteBase(c);
+  return authRouteBase ? `${authRouteBase}/cdn-cgi/access/logout` : "";
+}
+
+function getSwitchAccountTarget(c: Context<AppBindings>): string {
+  if (getConfiguredAuthMode() === "cloudflare" && cloudflareAccessTeamDomain) {
+    return `${cloudflareAccessTeamDomain}/cdn-cgi/access/logout`;
+  }
+
+  return getAppLogoutTarget(c);
+}
+
+async function getAuthUiUrls(c: Context<AppBindings>) {
+  const authRouteBase = getAuthRouteBase(c);
   const { user } = await resolveRequestUser(c);
 
   return {
     authMode: getConfiguredAuthMode(),
     publicAppUrl,
-    loginUrl,
-    logoutUrl: appLogoutBase ? `${appLogoutBase}/cdn-cgi/access/logout` : "",
-    switchAccountUrl,
+    loginUrl: authRouteBase,
+    logoutUrl: authRouteBase ? `${authRouteBase}/auth/logout` : "",
+    switchAccountUrl: authRouteBase ? `${authRouteBase}/auth/switch` : "",
     currentUser: user
       ? {
           email: user.email,
@@ -830,8 +862,8 @@ app.get("/api/fetch-meta", async (c) => {
 
     const contentType = response.headers.get("content-type") || "";
     const type = detectType(safeUrl, contentType);
-    let title = null;
-    let author = null;
+    let title: string | null = null;
+    let author: string | null = null;
 
     if (
       contentType.includes("text/html") ||

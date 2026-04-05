@@ -25,36 +25,17 @@
             <header>
                 <h1>Reading List</h1>
                 <div class="header-actions">
-                    <span class="header-badge" id="env-badge" hidden></span>
-                    <div class="account-menu" id="account-menu" hidden>
+                    <div class="account-entry" id="account-entry">
                         <button
                             type="button"
-                            class="account-button"
+                            class="account-icon-btn"
                             id="account-button"
                             aria-expanded="false"
-                            aria-haspopup="true"
-                        >
-                            <span class="account-icon" aria-hidden="true">◦</span>
-                            <span id="account-label"></span>
-                        </button>
-                        <div class="account-popover" id="account-popover" hidden>
-                            <p class="account-title" id="account-title"></p>
-                            <p class="account-email" id="account-email"></p>
-                            <p class="account-meta" id="account-meta"></p>
-                            <a
-                                class="header-link account-action"
-                                id="account-action"
-                                href="#"
-                                hidden
-                            ></a>
-                        </div>
+                            aria-haspopup="dialog"
+                            aria-controls="account-modal"
+                            title="Account"
+                        >A</button>
                     </div>
-                    <a
-                        class="header-link"
-                        id="auth-link"
-                        href="#"
-                        hidden
-                    ></a>
                     <button type="button" class="import-btn" id="import-btn">
                         Import CSV
                     </button>
@@ -670,6 +651,61 @@
                         <button type="submit" class="btn-primary">Save</button>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <div class="account-modal-overlay" id="account-modal-overlay" hidden>
+            <div
+                class="account-modal-backdrop"
+                id="account-modal-backdrop"
+                tabindex="-1"
+            ></div>
+            <div
+                class="account-modal"
+                id="account-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="account-modal-heading"
+            >
+                <div class="account-modal-header">
+                    <h2 id="account-modal-heading" class="account-modal-heading">
+                        Account
+                    </h2>
+                    <button
+                        type="button"
+                        class="modal-close"
+                        id="account-modal-close"
+                        aria-label="Close account"
+                    >
+                        ×
+                    </button>
+                </div>
+                <div class="account-modal-body">
+                    <div id="account-panel-user" hidden>
+                        <p class="account-title" id="account-title"></p>
+                        <p class="account-email" id="account-email"></p>
+                        <p class="account-meta" id="account-meta"></p>
+                        <a
+                            class="header-link account-modal-action"
+                            id="account-action"
+                            href="#"
+                            hidden
+                        ></a>
+                    </div>
+                    <div id="account-panel-guest" hidden>
+                        <p
+                            class="account-guest-message"
+                            id="account-guest-message"
+                        ></p>
+                        <p class="account-meta" id="account-guest-meta"></p>
+                        <a
+                            class="header-link account-modal-action"
+                            id="auth-link"
+                            href="#"
+                            hidden
+                        ></a>
+                    </div>
+                </div>
             </div>
         </div>
 
