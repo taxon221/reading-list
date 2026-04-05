@@ -96,76 +96,255 @@ export function renderTagPills(tagArray, container, input) {
   });
 }
 
-export function parseSearchQuery(input) {
-  const fieldTokens = [];
-  const freeTerms = [];
-  const pattern =
-    /(?:(title|author|url)\s*:\s*(~)?)\s*(?:"([^"]*)"|(\S+))|(?:"([^"]*)"|(\S+))/gi;
+export const searchFieldDefinitions = Object.freeze([
+  {
+    field: "type",
+    label: "type",
+    aliases: ["type", "kind"],
+    defaultOperator: "equals",
+    negativeOperator: "not_equals",
+    supportedOperators: ["equals", "not_equals"],
+  },
+  {
+    field: "website",
+    label: "website",
+    aliases: ["website", "site", "domain"],
+    defaultOperator: "contains",
+    negativeOperator: "not_contains",
+    supportedOperators: ["contains", "equals", "not_contains", "not_equals"],
+  },
+  {
+    field: "title",
+    label: "title",
+    aliases: ["title"],
+    defaultOperator: "contains",
+    negativeOperator: "not_contains",
+    supportedOperators: ["contains", "equals", "not_contains", "not_equals"],
+  },
+  {
+    field: "author",
+    label: "author",
+    aliases: ["author", "by"],
+    defaultOperator: "contains",
+    negativeOperator: "not_contains",
+    supportedOperators: ["contains", "equals", "not_contains", "not_equals"],
+  },
+  {
+    field: "tag",
+    label: "tag",
+    aliases: ["tag", "tags"],
+    defaultOperator: "equals",
+    negativeOperator: "not_equals",
+    supportedOperators: ["equals", "contains", "not_equals", "not_contains"],
+  },
+]);
+
+const searchFieldAliasMap = searchFieldDefinitions.reduce((map, definition) => {
+  definition.aliases.forEach((alias) => {
+    map[alias] = definition;
+  });
+  return map;
+}, {});
+
+const searchOperatorDefinitions = [
+  { raw: "does not contain", operator: "not_contains" },
+  { raw: "not contains", operator: "not_contains" },
+  { raw: "not contain", operator: "not_contains" },
+  { raw: "not_contains", operator: "not_contains" },
+  { raw: "not", operator: "negate" },
+  { raw: "is not", operator: "not_equals" },
+  { raw: "!=", operator: "not_equals" },
+  { raw: "!~", operator: "not_contains" },
+  { raw: "!", operator: "negate" },
+  { raw: "contains", operator: "contains" },
+  { raw: "equals", operator: "equals" },
+  { raw: "==", operator: "equals" },
+  { raw: "is", operator: "equals" },
+  { raw: "~", operator: "contains" },
+  { raw: "=", operator: "equals" },
+];
+
+function stripWrappingQuotes(value) {
+  const trimmed = String(value || "").trim();
+  if (
+    trimmed.length >= 2 &&
+    ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'")))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function normalizeSearchValue(value) {
+  return stripWrappingQuotes(value).replace(/\s+/g, " ").trim();
+}
+
+function resolveSearchField(fieldName) {
+  return searchFieldAliasMap[String(fieldName || "").trim().toLowerCase()] || null;
+}
+
+function getSearchOperatorLabel(operator) {
+  if (operator === "equals") return "=";
+  if (operator === "not_equals") return "!=";
+  if (operator === "not_contains") return "!~";
+  return "~";
+}
+
+export function looksLikeStructuredSearchDraft(input) {
+  const trimmed = String(input || "").trim().toLowerCase();
+  if (!trimmed) return false;
+  const match = trimmed.match(/^(?:(?:!|-)\s*)?([a-z]+)/);
+  if (!match) return false;
+  return Boolean(resolveSearchField(match[1]));
+}
+
+export function parseSearchTokenDraft(input) {
+  const trimmed = String(input || "").trim();
+  if (!trimmed) return null;
+
+  const negatedPrefixMatch = trimmed.match(/^([!-])\s*(.+)$/);
+  const negatedPrefix = Boolean(negatedPrefixMatch);
+  const working = negatedPrefix ? negatedPrefixMatch[2].trim() : trimmed;
+  const fieldMatch = working.match(/^([a-z]+)\b/i);
+
+  if (!fieldMatch) {
+    return { kind: "text", value: normalizeSearchValue(working) };
+  }
+
+  const definition = resolveSearchField(fieldMatch[1]);
+  if (!definition) {
+    return { kind: "text", value: normalizeSearchValue(trimmed) };
+  }
+
+  let rest = working.slice(fieldMatch[0].length).trim();
+  if (!rest) return null;
+
+  let operator = null;
+  const lowerRest = rest.toLowerCase();
+  const operatorMatch = searchOperatorDefinitions.find(({ raw }) => {
+    if (!lowerRest.startsWith(raw)) return false;
+    const next = lowerRest.charAt(raw.length);
+    return !next || /\s/.test(next);
+  });
+
+  if (operatorMatch) {
+    operator =
+      operatorMatch.operator === "negate"
+        ? definition.negativeOperator
+        : operatorMatch.operator;
+    rest = rest.slice(operatorMatch.raw.length).trim();
+  }
+
+  const value = normalizeSearchValue(rest);
+  if (!value) return null;
+
+  if (!operator) {
+    operator = negatedPrefix
+      ? definition.negativeOperator
+      : definition.defaultOperator;
+  } else if (negatedPrefix) {
+    operator =
+      operator === "equals"
+        ? "not_equals"
+        : operator === "contains"
+          ? "not_contains"
+          : operator;
+  }
+
+  return {
+    kind: "field",
+    field: definition.field,
+    operator,
+    value,
+  };
+}
+
+export function getSearchTokenLabel(token) {
+  if (!token) return "";
+  if (token.kind === "text") {
+    return `text contains ${JSON.stringify(token.value)}`;
+  }
+  return `${token.field} ${getSearchOperatorLabel(token.operator)} ${JSON.stringify(token.value)}`;
+}
+
+function getSearchItemValues(item, field) {
+  if (field === "title") return [item.title || ""];
+  if (field === "author") return [item.author || ""];
+  if (field === "type") return [item.type || ""];
+  if (field === "website") return [getDomain(item.url)];
+  if (field === "tag") return Array.isArray(item.tags) ? item.tags : [];
+  return [];
+}
+
+function tokenMatchesValue(values, token) {
+  const needle = String(token.value || "").toLowerCase();
+  if (!needle) return true;
+
+  const normalized = values
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+
+  if (token.operator === "equals") {
+    return normalized.some((value) => value === needle);
+  }
+  if (token.operator === "not_equals") {
+    return normalized.every((value) => value !== needle);
+  }
+  if (token.operator === "not_contains") {
+    return normalized.every((value) => !value.includes(needle));
+  }
+  return normalized.some((value) => value.includes(needle));
+}
+
+function matchesSearchToken(item, token) {
+  if (!token) return true;
+  if (token.kind === "text") {
+    const combined =
+      `${item.title || ""} ${item.author || ""} ${item.url || ""} ${(item.tags || []).join(" ")}`.toLowerCase();
+    return combined.includes(String(token.value || "").toLowerCase());
+  }
+  return tokenMatchesValue(getSearchItemValues(item, token.field), token);
+}
+
+function parseFreeTextTerms(input) {
+  const terms = [];
+  const pattern = /"([^"]+)"|'([^']+)'|(\S+)/g;
   let match = null;
 
   while (true) {
     match = pattern.exec(input);
-    if (match === null) break;
-
-    const field = (match[1] || "").toLowerCase();
-    const isRegex = Boolean(match[2]);
-    const fieldValue = (match[3] || match[4] || "").trim();
-    const freeValue = (match[5] || match[6] || "").trim();
-
-    if (field && fieldValue) {
-      fieldTokens.push({ field, isRegex, value: fieldValue });
-      continue;
-    }
-
-    if (freeValue) freeTerms.push(freeValue);
+    if (!match) break;
+    const value = normalizeSearchValue(match[1] || match[2] || match[3] || "");
+    if (value) terms.push(value.toLowerCase());
   }
 
-  return { fieldTokens, freeTerms };
+  return terms;
 }
 
-export function safeRegex(pattern) {
-  try {
-    return new RegExp(pattern, "i");
-  } catch {
-    return null;
-  }
-}
-
-export function getItemFieldValue(item, field) {
-  if (field === "title") return item.title || "";
-  if (field === "author") return item.author || "";
-  if (field === "url") return item.url || "";
-  return "";
-}
-
-export function applySearch(items, query) {
-  const trimmed = query.trim();
-  if (!trimmed) return items;
-
-  const parsed = parseSearchQuery(trimmed);
-  if (parsed.fieldTokens.length === 0 && parsed.freeTerms.length === 0) {
-    return items;
-  }
+export function applySearch(items, query, tokens = []) {
+  const trimmed = String(query || "").trim();
+  const draftToken = parseSearchTokenDraft(trimmed);
+  const freeTerms =
+    trimmed && (!draftToken || draftToken.kind === "text") && !looksLikeStructuredSearchDraft(trimmed)
+      ? parseFreeTextTerms(trimmed)
+      : [];
 
   return items.filter((item) => {
-    for (const token of parsed.fieldTokens) {
-      const haystack = getItemFieldValue(item, token.field);
-      if (token.isRegex) {
-        const regex = safeRegex(token.value);
-        if (!regex || !regex.test(haystack)) return false;
-      } else if (haystack.trim().toLowerCase() !== token.value.toLowerCase()) {
-        return false;
-      }
+    for (const token of tokens) {
+      if (!matchesSearchToken(item, token)) return false;
     }
 
-    if (parsed.freeTerms.length === 0) return true;
+    if (draftToken && draftToken.kind === "field") {
+      return matchesSearchToken(item, draftToken);
+    }
+
+    if (freeTerms.length === 0) return true;
 
     const combined =
-      `${item.title || ""} ${item.author || ""} ${item.url || ""}`.toLowerCase();
+      `${item.title || ""} ${item.author || ""} ${item.url || ""} ${(item.tags || []).join(" ")}`.toLowerCase();
 
-    return parsed.freeTerms.every((term) =>
-      combined.includes(term.toLowerCase()),
-    );
+    return freeTerms.every((term) => combined.includes(term));
   });
 }
 

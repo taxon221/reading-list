@@ -197,13 +197,24 @@
 
             <div id="reading-list-view">
                 <section class="search-section">
-                    <input
-                        type="text"
-                        id="search-input"
-                        class="search-input"
-                        placeholder='Search title, author, url (e.g. title:"Deep Work" url:~"test\\.com")'
-                        autocomplete="off"
-                    />
+                    <div class="search-shell" id="search-shell">
+                        <div
+                            class="search-token-list"
+                            id="search-token-list"
+                        ></div>
+                        <input
+                            type="text"
+                            id="search-input"
+                            class="search-input"
+                            placeholder='Search or add filters like `type article` or `website != "less"`'
+                            autocomplete="off"
+                        />
+                        <div
+                            class="search-suggestions"
+                            id="search-suggestions"
+                            aria-live="polite"
+                        ></div>
+                    </div>
                 </section>
                 <section class="filters">
                     <div class="filters-row">
