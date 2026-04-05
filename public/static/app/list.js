@@ -13,6 +13,168 @@ import { initListDelete, invalidateListDeleteFacets } from "./list-delete.js";
 import { applyListSearch, initListSearch, syncListSearchUi } from "./list-search.js";
 
 const DELETE_TYPE_VALUES = ["article", "video", "pdf", "ebook", "podcast"];
+const SAVED_VIEWS_STORAGE_KEY = "reading-list:saved-views";
+
+function normalizeViewName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function sanitizeStringArray(values, { lowercase = false } = {}) {
+  if (!Array.isArray(values)) return [];
+
+  const seen = new Set();
+  const result = [];
+
+  values.forEach((value) => {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return;
+
+    const normalized = lowercase ? trimmed.toLowerCase() : trimmed;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    result.push(normalized);
+  });
+
+  return result;
+}
+
+function sanitizeSearchToken(token) {
+  if (!token || typeof token !== "object") return null;
+
+  if (token.kind === "text") {
+    const value = String(token.value || "").replace(/\s+/g, " ").trim();
+    return value ? { kind: "text", value } : null;
+  }
+
+  if (token.kind !== "field") return null;
+
+  const field = String(token.field || "").trim().toLowerCase();
+  const operator = String(token.operator || "").trim().toLowerCase();
+  const value = String(token.value || "").replace(/\s+/g, " ").trim();
+
+  if (!field || !operator || !value) return null;
+  return { kind: "field", field, operator, value };
+}
+
+function sanitizeSavedViewFilters(filters = {}) {
+  const selectedTypes = sanitizeStringArray(filters.selectedTypes, { lowercase: true }).filter((value) =>
+    DELETE_TYPE_VALUES.includes(value),
+  );
+  const selectedTags = sanitizeStringArray(filters.selectedTags, { lowercase: true });
+  const excludedTags = sanitizeStringArray(filters.excludedTags, { lowercase: true }).filter(
+    (value) => !selectedTags.includes(value),
+  );
+  const selectedDomains = sanitizeStringArray(filters.selectedDomains, { lowercase: true });
+  const excludedDomains = sanitizeStringArray(filters.excludedDomains, { lowercase: true }).filter(
+    (value) => !selectedDomains.includes(value),
+  );
+  const selectedAuthors = sanitizeStringArray(filters.selectedAuthors);
+  const selectedAuthorKeys = new Set(selectedAuthors.map((value) => value.toLowerCase()));
+  const excludedAuthors = sanitizeStringArray(filters.excludedAuthors).filter(
+    (value) => !selectedAuthorKeys.has(value.toLowerCase()),
+  );
+
+  return {
+    selectedTypes,
+    selectedTags,
+    excludedTags,
+    selectedDomains,
+    excludedDomains,
+    selectedAuthors,
+    excludedAuthors,
+    searchTokens: Array.isArray(filters.searchTokens)
+      ? filters.searchTokens.map(sanitizeSearchToken).filter(Boolean)
+      : [],
+    searchQuery: String(filters.searchQuery || "").replace(/\s+/g, " ").trim(),
+  };
+}
+
+function createSavedViewId() {
+  return window.crypto?.randomUUID?.() || `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sanitizeSavedView(view) {
+  if (!view || typeof view !== "object") return null;
+
+  const name = normalizeViewName(view.name);
+  if (!name) return null;
+
+  return {
+    id: String(view.id || createSavedViewId()),
+    name,
+    filters: sanitizeSavedViewFilters(view.filters),
+  };
+}
+
+function getCurrentSavedViewFilters() {
+  return sanitizeSavedViewFilters({
+    selectedTypes: state.selectedTypes,
+    selectedTags: state.selectedTags,
+    excludedTags: state.excludedTags,
+    selectedDomains: state.selectedDomains,
+    excludedDomains: state.excludedDomains,
+    selectedAuthors: state.selectedAuthors,
+    excludedAuthors: state.excludedAuthors,
+    searchTokens: state.searchTokens,
+    searchQuery: state.searchQuery,
+  });
+}
+
+function sortValues(values) {
+  return [...values].sort((left, right) =>
+    String(left).localeCompare(String(right), undefined, { sensitivity: "base" }),
+  );
+}
+
+function getSearchTokenSignature(token) {
+  if (!token) return "";
+  if (token.kind === "text") return `text:${token.value.toLowerCase()}`;
+  return `field:${token.field}:${token.operator}:${token.value.toLowerCase()}`;
+}
+
+function buildSavedViewSignature(filters) {
+  const snapshot = sanitizeSavedViewFilters(filters);
+  return JSON.stringify({
+    selectedTypes: sortValues(snapshot.selectedTypes),
+    selectedTags: sortValues(snapshot.selectedTags),
+    excludedTags: sortValues(snapshot.excludedTags),
+    selectedDomains: sortValues(snapshot.selectedDomains),
+    excludedDomains: sortValues(snapshot.excludedDomains),
+    selectedAuthors: sortValues(snapshot.selectedAuthors.map((value) => value.toLowerCase())),
+    excludedAuthors: sortValues(snapshot.excludedAuthors.map((value) => value.toLowerCase())),
+    searchTokens: sortValues(snapshot.searchTokens.map(getSearchTokenSignature)),
+    searchQuery: snapshot.searchQuery.toLowerCase(),
+  });
+}
+
+function persistSavedViews() {
+  try {
+    if (state.savedViews.length === 0) {
+      window.localStorage.removeItem(SAVED_VIEWS_STORAGE_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(state.savedViews));
+  } catch {
+    // Ignore storage failures so filtering still works without persistence.
+  }
+}
+
+function loadSavedViewsFromStorage() {
+  try {
+    const raw = window.localStorage.getItem(SAVED_VIEWS_STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.map(sanitizeSavedView).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 function updateTagFilterDisplay() {
   if (!dom.tagFilterValue) return;
@@ -54,10 +216,6 @@ function updateTagDropdownState() {
   });
 }
 
-function updateSelectedTags() {
-  updateTagFilterDisplay();
-}
-
 function updateSelectedTypes() {
   state.selectedTypes = Array.from(
     dom.typeOptions?.querySelectorAll('input[type="checkbox"]:checked') || [],
@@ -69,6 +227,206 @@ function closeAllDropdowns() {
   dom.typeDropdown?.classList.remove("open");
   dom.tagDropdown?.classList.remove("open");
   dom.deleteDropdown?.classList.remove("open");
+  dom.viewsDropdown?.classList.remove("open");
+}
+
+function syncTypeInputs() {
+  dom.typeOptions?.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.checked = state.selectedTypes.includes(checkbox.value);
+  });
+}
+
+function updateViewsFilterDisplay() {
+  if (!dom.viewsFilterValue) return;
+  const activeView = state.savedViews.find((view) => view.id === state.activeSavedViewId);
+  dom.viewsFilterValue.textContent = activeView?.name || "None";
+}
+
+function openSaveViewModal() {
+  if (!dom.saveViewModal) return;
+  const activeName =
+    state.savedViews.find((view) => view.id === state.activeSavedViewId)?.name || "";
+  dom.saveViewModal.style.display = "flex";
+  if (dom.saveViewName) {
+    dom.saveViewName.value = activeName;
+    dom.saveViewName.focus();
+    dom.saveViewName.select();
+  }
+}
+
+function closeSaveViewModal() {
+  if (!dom.saveViewModal) return;
+  dom.saveViewModal.style.display = "none";
+  if (dom.saveViewName) dom.saveViewName.value = "";
+}
+
+function renderSavedViewOptions() {
+  if (!dom.viewsOptions) return;
+
+  if (state.savedViews.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "dropdown-empty";
+    empty.textContent = "No saved views yet";
+    dom.viewsOptions.replaceChildren(empty);
+    return;
+  }
+
+  const options = state.savedViews.map((view) => {
+    const row = document.createElement("label");
+    row.className = "dropdown-option";
+    row.dataset.value = view.id;
+
+    const content = document.createElement("div");
+    content.className = "view-option";
+
+    const labelWrap = document.createElement("span");
+    labelWrap.className = "view-option-label";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = view.id === state.activeSavedViewId;
+    checkbox.setAttribute("aria-label", `Apply saved view ${view.name}`);
+
+    const text = document.createElement("span");
+    text.className = "view-option-text";
+    text.textContent = view.name;
+
+    labelWrap.append(checkbox, text);
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "view-option-remove";
+    removeButton.textContent = "×";
+    removeButton.title = `Delete ${view.name}`;
+    removeButton.setAttribute("aria-label", `Delete saved view ${view.name}`);
+    removeButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeSavedView(view.id);
+    });
+
+    content.append(labelWrap, removeButton);
+    row.appendChild(content);
+    row.addEventListener("click", (event) => {
+      event.preventDefault();
+      applySavedView(view.id);
+      closeAllDropdowns();
+    });
+    return row;
+  });
+
+  dom.viewsOptions.replaceChildren(...options);
+}
+
+function syncActiveSavedView() {
+  const currentSignature = buildSavedViewSignature(getCurrentSavedViewFilters());
+  const nextActiveId =
+    state.savedViews.find((view) => buildSavedViewSignature(view.filters) === currentSignature)?.id || "";
+
+  state.activeSavedViewId = nextActiveId;
+  updateViewsFilterDisplay();
+  renderSavedViewOptions();
+}
+
+function syncFilterUi() {
+  syncTypeInputs();
+  updateTypeFilterDisplay();
+  updateTagDropdownState();
+  updateTagFilterDisplay();
+  renderFilterChips();
+  syncListSearchUi(DELETE_TYPE_VALUES);
+  syncActiveSavedView();
+}
+
+function refreshList({ reloadServer = false } = {}) {
+  syncFilterUi();
+  if (reloadServer) {
+    loadItems();
+    return;
+  }
+  renderCurrentItems();
+}
+
+function applySavedView(viewId) {
+  const view = state.savedViews.find((entry) => entry.id === viewId);
+  if (!view) return;
+
+  const filters = sanitizeSavedViewFilters(view.filters);
+  state.selectedTypes = filters.selectedTypes;
+  state.selectedTags = filters.selectedTags;
+  state.excludedTags = filters.excludedTags;
+  state.selectedDomains = filters.selectedDomains;
+  state.excludedDomains = filters.excludedDomains;
+  state.selectedAuthors = filters.selectedAuthors;
+  state.excludedAuthors = filters.excludedAuthors;
+  state.searchTokens = filters.searchTokens;
+  state.searchQuery = filters.searchQuery;
+
+  if (dom.searchInput) dom.searchInput.value = filters.searchQuery;
+
+  closeAllDropdowns();
+  closeSaveViewModal();
+  refreshList({ reloadServer: true });
+}
+
+function saveCurrentView() {
+  const name = normalizeViewName(dom.saveViewName?.value);
+  if (!name) {
+    dom.saveViewName?.focus();
+    return;
+  }
+
+  const filters = getCurrentSavedViewFilters();
+  const existing = state.savedViews.find((view) => view.name.toLowerCase() === name.toLowerCase());
+  const nextView = {
+    id: existing?.id || createSavedViewId(),
+    name,
+    filters,
+  };
+
+  state.savedViews = [nextView, ...state.savedViews.filter((view) => view.id !== nextView.id)];
+  persistSavedViews();
+  closeSaveViewModal();
+  syncActiveSavedView();
+}
+
+function removeSavedView(viewId) {
+  state.savedViews = state.savedViews.filter((view) => view.id !== viewId);
+  persistSavedViews();
+  syncActiveSavedView();
+}
+
+function initSavedViews() {
+  state.savedViews = loadSavedViewsFromStorage();
+  updateViewsFilterDisplay();
+  renderSavedViewOptions();
+
+  dom.saveViewOpen?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openSaveViewModal();
+  });
+  dom.saveViewModalClose?.addEventListener("click", closeSaveViewModal);
+  dom.saveViewCancel?.addEventListener("click", () => {
+    closeSaveViewModal();
+  });
+
+  dom.saveViewForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveCurrentView();
+  });
+
+  dom.saveViewName?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSaveViewModal();
+    }
+  });
+
+  dom.saveViewModal?.addEventListener("click", (event) => {
+    if (event.target === dom.saveViewModal) closeSaveViewModal();
+  });
+
+  syncActiveSavedView();
 }
 
 function showView(view) {
@@ -129,7 +487,7 @@ function createItemElement(item) {
   const meta = document.createElement("div");
   meta.className = "item-meta";
 
-    const domainStr = getDomain(item.url);
+  const domainStr = getDomain(item.url);
   const domain = document.createElement("button");
   domain.type = "button";
   domain.className = "item-domain item-filter-btn";
@@ -308,9 +666,7 @@ function renderTagOptions(tags) {
       state.excludedTags = state.excludedTags.filter((t) => t !== tag.name);
       if (nextState === "include") state.selectedTags.push(tag.name);
       if (nextState === "exclude") state.excludedTags.push(tag.name);
-      updateTagFilterDisplay();
-      renderFilterChips();
-      loadItems();
+      refreshList({ reloadServer: true });
     });
     return label;
   });
@@ -355,7 +711,7 @@ async function loadItems() {
 
   const items = await response.json();
   state.itemsById = new Map(items.map((item) => [Number(item.id), item]));
-  syncListSearchUi(DELETE_TYPE_VALUES);
+  syncFilterUi();
   renderItems(applyClientFilters(items));
 }
 
@@ -371,6 +727,7 @@ async function loadTags() {
   invalidateListDeleteFacets();
   renderTagOptions(tags);
   updateTagFilterDisplay();
+  syncActiveSavedView();
 }
 
 function toggleInclude(type, value) {
@@ -382,12 +739,7 @@ function toggleInclude(type, value) {
     state[selected] = [...state[selected], value];
     state[excluded] = state[excluded].filter((v) => v !== value);
   }
-  renderFilterChips();
-  if (type === "domain" || type === "author") {
-    renderCurrentItems();
-  } else {
-    loadItems();
-  }
+  refreshList({ reloadServer: type !== "domain" && type !== "author" });
 }
 
 function toggleExclude(type, value) {
@@ -399,22 +751,14 @@ function toggleExclude(type, value) {
     state[excluded] = [...state[excluded], value];
     state[selected] = state[selected].filter((v) => v !== value);
   }
-  renderFilterChips();
-  if (type === "domain" || type === "author") {
-    renderCurrentItems();
-  } else {
-    loadItems();
-  }
+  refreshList({ reloadServer: type !== "domain" && type !== "author" });
 }
 
 function filterByTag(tag) {
   if (state.selectedTags.includes(tag)) return;
   state.selectedTags = [...state.selectedTags, tag];
   state.excludedTags = state.excludedTags.filter((t) => t !== tag);
-  updateTagDropdownState();
-  updateTagFilterDisplay();
-  renderFilterChips();
-  loadItems();
+  refreshList({ reloadServer: true });
 }
 
 function createFilterChip(text, onRemove, isExclude) {
@@ -438,47 +782,37 @@ function renderFilterChips() {
   for (const tag of state.selectedTags) {
     chips.push(createFilterChip(`#${tag}`, () => {
       state.selectedTags = state.selectedTags.filter((t) => t !== tag);
-      updateTagDropdownState();
-      updateTagFilterDisplay();
-      renderFilterChips();
-      loadItems();
+      refreshList({ reloadServer: true });
     }, false));
   }
   for (const tag of state.excludedTags) {
     chips.push(createFilterChip(`not #${tag}`, () => {
       state.excludedTags = state.excludedTags.filter((t) => t !== tag);
-      updateTagDropdownState();
-      updateTagFilterDisplay();
-      renderFilterChips();
-      loadItems();
+      refreshList({ reloadServer: true });
     }, true));
   }
   for (const d of state.selectedDomains) {
     chips.push(createFilterChip(d, () => {
       state.selectedDomains = state.selectedDomains.filter((v) => v !== d);
-      renderFilterChips();
-      renderCurrentItems();
+      refreshList();
     }, false));
   }
   for (const d of state.excludedDomains) {
     chips.push(createFilterChip(`not ${d}`, () => {
       state.excludedDomains = state.excludedDomains.filter((v) => v !== d);
-      renderFilterChips();
-      renderCurrentItems();
+      refreshList();
     }, true));
   }
   for (const a of state.selectedAuthors) {
     chips.push(createFilterChip(`by ${a}`, () => {
       state.selectedAuthors = state.selectedAuthors.filter((v) => v !== a);
-      renderFilterChips();
-      renderCurrentItems();
+      refreshList();
     }, false));
   }
   for (const a of state.excludedAuthors) {
     chips.push(createFilterChip(`not by ${a}`, () => {
       state.excludedAuthors = state.excludedAuthors.filter((v) => v !== a);
-      renderFilterChips();
-      renderCurrentItems();
+      refreshList();
     }, true));
   }
 
@@ -581,7 +915,7 @@ function initDropdowns() {
   dom.typeOptions?.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
       updateSelectedTypes();
-      loadItems();
+      refreshList({ reloadServer: true });
     });
   });
 
@@ -602,6 +936,15 @@ function initDropdowns() {
     if (!isOpen) {
       dom.tagDropdown?.classList.add("open");
       dom.tagSearch?.focus();
+    }
+  });
+
+  dom.viewsFilterBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const isOpen = dom.viewsDropdown?.classList.contains("open");
+    closeAllDropdowns();
+    if (!isOpen) {
+      dom.viewsDropdown?.classList.add("open");
     }
   });
 
@@ -632,17 +975,13 @@ function initDropdowns() {
       checkbox.checked = false;
     });
     state.selectedTypes = [];
-    updateTypeFilterDisplay();
-    loadItems();
+    refreshList({ reloadServer: true });
   });
 
   dom.tagClear?.addEventListener("click", () => {
     state.selectedTags = [];
     state.excludedTags = [];
-    updateTagDropdownState();
-    updateTagFilterDisplay();
-    renderFilterChips();
-    loadItems();
+    refreshList({ reloadServer: true });
   });
 }
 
@@ -770,13 +1109,19 @@ export function initList(app) {
   app.closeItemMenu = closeItemMenu;
 
   initDropdowns();
-  initListSearch({ onChange: renderCurrentItems, typeValues: DELETE_TYPE_VALUES });
+  initSavedViews();
+  initListSearch({
+    onChange: () => {
+      renderCurrentItems();
+      syncActiveSavedView();
+    },
+    typeValues: DELETE_TYPE_VALUES,
+  });
   initViewTabs(app);
   initItemMenu();
   initItemsList(app);
   initEditModal();
-  updateSelectedTypes();
-  updateSelectedTags();
+  syncFilterUi();
 
   initListDelete({
     closeAllDropdowns,

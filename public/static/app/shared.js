@@ -46,6 +46,8 @@ export const state = {
   articleProgressPoll: null,
   mobileSelectionPoll: null,
   mobilePopupDismissTimer: null,
+  savedViews: [],
+  activeSavedViewId: "",
 };
 
 export const dom = {
@@ -123,7 +125,17 @@ export const dom = {
   deleteValueOptions: byId("delete-value-options"),
   deleteClear: byId("delete-clear"),
   deleteConfirm: byId("delete-confirm"),
+  viewsDropdown: byId("views-dropdown"),
+  viewsFilterBtn: byId("views-filter-btn"),
+  viewsFilterValue: byId("views-filter-value"),
+  viewsOptions: byId("views-options"),
   filterChips: byId("filter-chips"),
+  saveViewOpen: byId("save-view-open"),
+  saveViewModal: byId("save-view-modal"),
+  saveViewModalClose: byId("save-view-modal-close"),
+  saveViewForm: byId("save-view-form"),
+  saveViewName: byId("save-view-name"),
+  saveViewCancel: byId("save-view-cancel"),
   accountEntry: byId("account-entry"),
   accountButton: byId("account-button"),
   accountModalOverlay: byId("account-modal-overlay"),

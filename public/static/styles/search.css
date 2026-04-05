@@ -2,6 +2,10 @@
     .search-input {
         min-width: 100%;
     }
+
+    .search-action-btn {
+        width: 100%;
+    }
 }
 
 .search-section {
@@ -99,6 +103,28 @@
 
 .search-input:focus {
     outline: none;
+}
+
+.search-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    color: var(--text);
+    font-size: 0.75rem;
+    font-family: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.search-action-btn:hover {
+    background: var(--bg);
+    border-color: var(--text-light);
 }
 
 .search-suggestions {

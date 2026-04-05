@@ -209,6 +209,13 @@
                             placeholder='Search or add filters like `type article` or `website != "less"`'
                             autocomplete="off"
                         />
+                        <button
+                            type="button"
+                            class="search-action-btn"
+                            id="save-view-open"
+                        >
+                            Save view
+                        </button>
                         <div
                             class="search-suggestions"
                             id="search-suggestions"
@@ -219,71 +226,71 @@
                 <section class="filters">
                     <div class="filters-row">
                         <div class="filter-dropdown" id="type-dropdown">
-                        <button
-                            type="button"
-                            class="filter-btn"
-                            id="type-filter-btn"
-                        >
-                            <span class="filter-label">Type</span>
-                            <span class="filter-value" id="type-filter-value"
-                                >All</span
+                            <button
+                                type="button"
+                                class="filter-btn"
+                                id="type-filter-btn"
                             >
-                            <span class="filter-arrow">▾</span>
-                        </button>
-                        <div class="dropdown-menu" id="type-menu">
-                            <div class="dropdown-search">
-                                <input
-                                    type="text"
-                                    placeholder="Search..."
-                                    id="type-search"
-                                    autocomplete="off"
-                                />
-                            </div>
-                            <div class="dropdown-options" id="type-options">
-                                <label
-                                    class="dropdown-option"
-                                    data-value="article"
+                                <span class="filter-label">Type</span>
+                                <span class="filter-value" id="type-filter-value"
+                                    >All</span
                                 >
-                                    <input type="checkbox" value="article" />
-                                    Article
-                                </label>
-                                <label
-                                    class="dropdown-option"
-                                    data-value="video"
-                                >
-                                    <input type="checkbox" value="video" />
-                                    Video
-                                </label>
-                                <label class="dropdown-option" data-value="pdf">
-                                    <input type="checkbox" value="pdf" />
-                                    PDF
-                                </label>
-                                <label
-                                    class="dropdown-option"
-                                    data-value="ebook"
-                                >
-                                    <input type="checkbox" value="ebook" />
-                                    Ebook
-                                </label>
-                                <label
-                                    class="dropdown-option"
-                                    data-value="podcast"
-                                >
-                                    <input type="checkbox" value="podcast" />
-                                    Podcast
-                                </label>
-                            </div>
-                            <div class="dropdown-actions">
-                                <button
-                                    type="button"
-                                    class="dropdown-clear"
-                                    id="type-clear"
-                                >
-                                    Clear
-                                </button>
+                                <span class="filter-arrow">▾</span>
+                            </button>
+                            <div class="dropdown-menu" id="type-menu">
+                                <div class="dropdown-search">
+                                    <input
+                                        type="text"
+                                        placeholder="Search..."
+                                        id="type-search"
+                                        autocomplete="off"
+                                    />
+                                </div>
+                                <div class="dropdown-options" id="type-options">
+                                    <label
+                                        class="dropdown-option"
+                                        data-value="article"
+                                    >
+                                        <input type="checkbox" value="article" />
+                                        Article
+                                    </label>
+                                    <label
+                                        class="dropdown-option"
+                                        data-value="video"
+                                    >
+                                        <input type="checkbox" value="video" />
+                                        Video
+                                    </label>
+                                    <label class="dropdown-option" data-value="pdf">
+                                        <input type="checkbox" value="pdf" />
+                                        PDF
+                                    </label>
+                                    <label
+                                        class="dropdown-option"
+                                        data-value="ebook"
+                                    >
+                                        <input type="checkbox" value="ebook" />
+                                        Ebook
+                                    </label>
+                                    <label
+                                        class="dropdown-option"
+                                        data-value="podcast"
+                                    >
+                                        <input type="checkbox" value="podcast" />
+                                        Podcast
+                                    </label>
+                                </div>
+                                <div class="dropdown-actions">
+                                    <button
+                                        type="button"
+                                        class="dropdown-clear"
+                                        id="type-clear"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
                         <div class="filter-dropdown" id="tag-dropdown">
                             <button
@@ -319,6 +326,25 @@
                                         Clear
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+                        <div class="filter-dropdown" id="views-dropdown">
+                            <button
+                                type="button"
+                                class="filter-btn"
+                                id="views-filter-btn"
+                            >
+                                <span class="filter-label">Views</span>
+                                <span class="filter-value" id="views-filter-value"
+                                    >None</span
+                                >
+                                <span class="filter-arrow">▾</span>
+                            </button>
+                            <div class="dropdown-menu views-menu" id="views-menu">
+                                <div
+                                    class="dropdown-options views-options"
+                                    id="views-options"
+                                ></div>
                             </div>
                         </div>
                         <div class="filter-dropdown" id="delete-dropdown">
@@ -707,6 +733,44 @@
                 </svg>
                 Open original URL
             </button>
+        </div>
+
+        <div class="modal-overlay" id="save-view-modal" style="display: none">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Save View</h2>
+                    <button
+                        type="button"
+                        class="modal-close"
+                        id="save-view-modal-close"
+                    >
+                        ×
+                    </button>
+                </div>
+                <form id="save-view-form">
+                    <div class="form-group">
+                        <label for="save-view-name">Name</label>
+                        <input
+                            type="text"
+                            id="save-view-name"
+                            maxlength="40"
+                            placeholder="For example: Hide X"
+                            autocomplete="off"
+                            required
+                        />
+                    </div>
+                    <div class="modal-actions">
+                        <button
+                            type="button"
+                            class="btn-secondary"
+                            id="save-view-cancel"
+                        >
+                            Cancel
+                        </button>
+                        <button type="submit" class="btn-primary">Save</button>
+                    </div>
+                </form>
+            </div>
         </div>
 
         <div class="modal-overlay" id="edit-modal" style="display: none">
