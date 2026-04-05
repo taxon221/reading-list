@@ -1,3 +1,5 @@
+import { state } from "./shared.js";
+
 export function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -48,15 +50,120 @@ export function parseTitleAuthorFromFilename(name) {
 export function setupTagInput(input, tagArray, container) {
   if (!input || !container) return;
 
+  let activeSuggestionIndex = -1;
+
+  const suggestionsEl = document.createElement("div");
+  suggestionsEl.className = "tag-suggestions";
+  suggestionsEl.style.display = "none";
+  container.appendChild(suggestionsEl);
+
+  const getMatchingSuggestions = () => {
+    const query = input.value.trim().toLowerCase();
+    const source = Array.isArray(state.availableTags) ? state.availableTags : [];
+    if (!query) return [];
+
+    return source
+      .filter((tag) => {
+        const normalized = String(tag || "").trim().toLowerCase();
+        return normalized && !tagArray.includes(normalized) && normalized.includes(query);
+      })
+      .sort((left, right) => {
+        const leftStarts = left.startsWith(query) ? 0 : 1;
+        const rightStarts = right.startsWith(query) ? 0 : 1;
+        if (leftStarts !== rightStarts) return leftStarts - rightStarts;
+        return left.localeCompare(right);
+      })
+      .slice(0, 6);
+  };
+
+  const closeSuggestions = () => {
+    activeSuggestionIndex = -1;
+    suggestionsEl.replaceChildren();
+    suggestionsEl.style.display = "none";
+    container.classList.remove("has-tag-suggestions");
+  };
+
+  const addTag = (rawTag) => {
+    const tag = String(rawTag || "").trim().toLowerCase();
+    if (!tag || tagArray.includes(tag)) return false;
+    tagArray.push(tag);
+    renderTagPills(tagArray, container, input);
+    input.value = "";
+    closeSuggestions();
+    return true;
+  };
+
+  const commitActiveOrTypedTag = () => {
+    const suggestions = getMatchingSuggestions();
+    if (activeSuggestionIndex >= 0 && suggestions[activeSuggestionIndex]) {
+      return addTag(suggestions[activeSuggestionIndex]);
+    }
+    return addTag(input.value);
+  };
+
+  const renderSuggestions = () => {
+    const suggestions = getMatchingSuggestions();
+    if (suggestions.length === 0) {
+      closeSuggestions();
+      return;
+    }
+
+    if (activeSuggestionIndex >= suggestions.length) {
+      activeSuggestionIndex = suggestions.length - 1;
+    }
+
+    const items = suggestions.map((tag, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className =
+        index === activeSuggestionIndex
+          ? "tag-suggestion is-active"
+          : "tag-suggestion";
+      button.textContent = tag;
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+      });
+      button.addEventListener("click", () => {
+        addTag(tag);
+        input.focus();
+      });
+      return button;
+    });
+
+    suggestionsEl.replaceChildren(...items);
+    suggestionsEl.style.display = "flex";
+    container.classList.add("has-tag-suggestions");
+  };
+
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
-      const tag = input.value.trim().toLowerCase();
-      if (tag && !tagArray.includes(tag)) {
-        tagArray.push(tag);
-        renderTagPills(tagArray, container, input);
-      }
-      input.value = "";
+      commitActiveOrTypedTag();
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      const suggestions = getMatchingSuggestions();
+      if (suggestions.length === 0) return;
+      event.preventDefault();
+      activeSuggestionIndex =
+        activeSuggestionIndex >= suggestions.length - 1 ? 0 : activeSuggestionIndex + 1;
+      renderSuggestions();
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      const suggestions = getMatchingSuggestions();
+      if (suggestions.length === 0) return;
+      event.preventDefault();
+      activeSuggestionIndex =
+        activeSuggestionIndex <= 0 ? suggestions.length - 1 : activeSuggestionIndex - 1;
+      renderSuggestions();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      closeSuggestions();
       return;
     }
 
@@ -68,6 +175,21 @@ export function setupTagInput(input, tagArray, container) {
       tagArray.pop();
       renderTagPills(tagArray, container, input);
     }
+  });
+
+  input.addEventListener("input", () => {
+    activeSuggestionIndex = -1;
+    renderSuggestions();
+  });
+
+  input.addEventListener("focus", () => {
+    renderSuggestions();
+  });
+
+  input.addEventListener("blur", () => {
+    window.setTimeout(() => {
+      closeSuggestions();
+    }, 120);
   });
 }
 

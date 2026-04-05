@@ -18,6 +18,7 @@ export const state = {
   excludedDomains: [],
   selectedAuthors: [],
   excludedAuthors: [],
+  availableTags: [],
   pendingTags: [],
   editTags: [],
   fetchedMeta: null,

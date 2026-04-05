@@ -309,6 +309,10 @@ function renderSavedViewOptions() {
     row.appendChild(content);
     row.addEventListener("click", (event) => {
       event.preventDefault();
+      if (view.id === state.activeSavedViewId) {
+        clearActiveView();
+        return;
+      }
       applySavedView(view.id);
       closeAllDropdowns();
     });
@@ -345,6 +349,24 @@ function refreshList({ reloadServer = false } = {}) {
     return;
   }
   renderCurrentItems();
+}
+
+function clearActiveView() {
+  state.selectedTypes = [];
+  state.selectedTags = [];
+  state.excludedTags = [];
+  state.selectedDomains = [];
+  state.excludedDomains = [];
+  state.selectedAuthors = [];
+  state.excludedAuthors = [];
+  state.searchTokens = [];
+  state.searchQuery = "";
+
+  if (dom.searchInput) dom.searchInput.value = "";
+
+  closeAllDropdowns();
+  closeSaveViewModal();
+  refreshList({ reloadServer: true });
 }
 
 function applySavedView(viewId) {
@@ -724,6 +746,9 @@ async function loadTags() {
   if (!response.ok) return;
 
   const tags = await response.json();
+  state.availableTags = tags
+    .map((tag) => String(tag?.name || "").trim().toLowerCase())
+    .filter(Boolean);
   invalidateListDeleteFacets();
   renderTagOptions(tags);
   updateTagFilterDisplay();
