@@ -47,7 +47,7 @@ export function parseTitleAuthorFromFilename(name) {
   return { title: base, author: "" };
 }
 
-export function setupTagInput(input, tagArray, container) {
+export function setupTagInput(input, tagArray, container, options = {}) {
   if (!input || !container) return;
 
   let activeSuggestionIndex = -1;
@@ -93,10 +93,13 @@ export function setupTagInput(input, tagArray, container) {
     return true;
   };
 
-  const commitActiveOrTypedTag = () => {
+  const commitActiveOrTypedTag = ({ preferSuggestion = false } = {}) => {
     const suggestions = getMatchingSuggestions();
     if (activeSuggestionIndex >= 0 && suggestions[activeSuggestionIndex]) {
       return addTag(suggestions[activeSuggestionIndex]);
+    }
+    if (preferSuggestion && suggestions[0]) {
+      return addTag(suggestions[0]);
     }
     return addTag(input.value);
   };
@@ -136,9 +139,18 @@ export function setupTagInput(input, tagArray, container) {
   };
 
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === "Tab") {
+    if (event.key === "Enter") {
       event.preventDefault();
       commitActiveOrTypedTag();
+      return;
+    }
+
+    if (event.key === "Tab") {
+      if (!input.value.trim()) return;
+      event.preventDefault();
+      commitActiveOrTypedTag({
+        preferSuggestion: options.preferSuggestionOnTab === true,
+      });
       return;
     }
 

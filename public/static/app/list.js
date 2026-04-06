@@ -13,7 +13,24 @@ import { initListDelete, invalidateListDeleteFacets } from "./list-delete.js";
 import { applyListSearch, initListSearch, syncListSearchUi } from "./list-search.js";
 
 const DELETE_TYPE_VALUES = ["article", "video", "pdf", "ebook", "podcast"];
-const SAVED_VIEWS_STORAGE_KEY = "reading-list:saved-views";
+const LEGACY_SAVED_VIEWS_STORAGE_KEY = "reading-list:saved-views";
+
+function isMobilePwa() {
+  const standalone =
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    window.navigator.standalone === true;
+  if (!standalone) return false;
+
+  return (
+    window.matchMedia?.("(pointer: coarse)")?.matches ||
+    /android|iphone|ipad|ipod/i.test(window.navigator.userAgent || "")
+  );
+}
+
+function focusDropdownSearch(input) {
+  if (!input || isMobilePwa()) return;
+  input.focus();
+}
 
 function normalizeViewName(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -149,22 +166,9 @@ function buildSavedViewSignature(filters) {
   });
 }
 
-function persistSavedViews() {
+function loadLegacySavedViewsFromStorage() {
   try {
-    if (state.savedViews.length === 0) {
-      window.localStorage.removeItem(SAVED_VIEWS_STORAGE_KEY);
-      return;
-    }
-
-    window.localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(state.savedViews));
-  } catch {
-    // Ignore storage failures so filtering still works without persistence.
-  }
-}
-
-function loadSavedViewsFromStorage() {
-  try {
-    const raw = window.localStorage.getItem(SAVED_VIEWS_STORAGE_KEY);
+    const raw = window.localStorage.getItem(LEGACY_SAVED_VIEWS_STORAGE_KEY);
     if (!raw) return [];
 
     const parsed = JSON.parse(raw);
@@ -174,6 +178,86 @@ function loadSavedViewsFromStorage() {
   } catch {
     return [];
   }
+}
+
+function clearLegacySavedViewsFromStorage() {
+  try {
+    window.localStorage.removeItem(LEGACY_SAVED_VIEWS_STORAGE_KEY);
+  } catch {}
+}
+
+function mergeSavedViews(primaryViews, secondaryViews) {
+  const merged = [];
+  const seenNames = new Set();
+
+  [...primaryViews, ...secondaryViews].forEach((view) => {
+    const sanitized = sanitizeSavedView(view);
+    if (!sanitized) return;
+
+    const key = sanitized.name.toLowerCase();
+    if (seenNames.has(key)) return;
+    seenNames.add(key);
+    merged.push(sanitized);
+  });
+
+  return merged;
+}
+
+async function persistSavedViews() {
+  const response = await fetch("/api/preferences/saved-views", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ savedViews: state.savedViews }),
+  }).catch(() => null);
+
+  if (!response) {
+    alert("Saved views could not be synced right now.");
+    return false;
+  }
+  if (handleAuthFailure(response)) return false;
+  if (!response.ok) {
+    alert("Saved views could not be synced right now.");
+    return false;
+  }
+
+  const data = await response.json().catch(() => ({}));
+  state.savedViews = Array.isArray(data?.savedViews)
+    ? data.savedViews.map(sanitizeSavedView).filter(Boolean)
+    : state.savedViews;
+  clearLegacySavedViewsFromStorage();
+  return true;
+}
+
+async function loadSavedViews() {
+  if (state.isUnauthorized) return;
+
+  const response = await fetch("/api/preferences/saved-views").catch(() => null);
+  if (!response) return;
+  if (handleAuthFailure(response)) return;
+  if (!response.ok) return;
+
+  const data = await response.json().catch(() => []);
+  const serverViews = (Array.isArray(data) ? data : [])
+    .map(sanitizeSavedView)
+    .filter(Boolean);
+  const legacyViews = loadLegacySavedViewsFromStorage();
+  const mergedViews = mergeSavedViews(serverViews, legacyViews);
+
+  state.savedViews = mergedViews;
+  updateViewsFilterDisplay();
+  renderSavedViewOptions();
+  syncActiveSavedView();
+
+  if (
+    legacyViews.length > 0 &&
+    JSON.stringify(mergedViews) !== JSON.stringify(serverViews)
+  ) {
+    await persistSavedViews();
+    syncActiveSavedView();
+    return;
+  }
+
+  clearLegacySavedViewsFromStorage();
 }
 
 function updateTagFilterDisplay() {
@@ -391,7 +475,7 @@ function applySavedView(viewId) {
   refreshList({ reloadServer: true });
 }
 
-function saveCurrentView() {
+async function saveCurrentView() {
   const name = normalizeViewName(dom.saveViewName?.value);
   if (!name) {
     dom.saveViewName?.focus();
@@ -406,20 +490,29 @@ function saveCurrentView() {
     filters,
   };
 
+  const previousViews = [...state.savedViews];
   state.savedViews = [nextView, ...state.savedViews.filter((view) => view.id !== nextView.id)];
-  persistSavedViews();
+  const persisted = await persistSavedViews();
+  if (!persisted) {
+    state.savedViews = previousViews;
+    syncActiveSavedView();
+    return;
+  }
   closeSaveViewModal();
   syncActiveSavedView();
 }
 
-function removeSavedView(viewId) {
+async function removeSavedView(viewId) {
+  const previousViews = [...state.savedViews];
   state.savedViews = state.savedViews.filter((view) => view.id !== viewId);
-  persistSavedViews();
+  const persisted = await persistSavedViews();
+  if (!persisted) {
+    state.savedViews = previousViews;
+  }
   syncActiveSavedView();
 }
 
 function initSavedViews() {
-  state.savedViews = loadSavedViewsFromStorage();
   updateViewsFilterDisplay();
   renderSavedViewOptions();
 
@@ -432,9 +525,9 @@ function initSavedViews() {
     closeSaveViewModal();
   });
 
-  dom.saveViewForm?.addEventListener("submit", (event) => {
+  dom.saveViewForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    saveCurrentView();
+    await saveCurrentView();
   });
 
   dom.saveViewName?.addEventListener("keydown", (event) => {
@@ -950,7 +1043,7 @@ function initDropdowns() {
     closeAllDropdowns();
     if (!isOpen) {
       dom.typeDropdown?.classList.add("open");
-      dom.typeSearch?.focus();
+      focusDropdownSearch(dom.typeSearch);
     }
   });
 
@@ -960,7 +1053,7 @@ function initDropdowns() {
     closeAllDropdowns();
     if (!isOpen) {
       dom.tagDropdown?.classList.add("open");
-      dom.tagSearch?.focus();
+      focusDropdownSearch(dom.tagSearch);
     }
   });
 
@@ -1129,6 +1222,7 @@ function initEditModal() {
 export function initList(app) {
   app.loadItems = loadItems;
   app.loadTags = loadTags;
+  app.loadSavedViews = loadSavedViews;
   app.showView = showView;
   app.closeEditModal = closeEditModal;
   app.closeItemMenu = closeItemMenu;

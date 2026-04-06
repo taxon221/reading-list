@@ -253,38 +253,46 @@ header h1 {
 }
 
 .theme-toggle {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 36px;
     height: 36px;
     padding: 0;
-    background: transparent;
-    color: var(--text-muted);
-    border: none;
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all 0.15s;
+    transition:
+        background 0.15s,
+        border-color 0.15s,
+        color 0.15s,
+        box-shadow 0.15s;
+    appearance: none;
+    -webkit-appearance: none;
+    font: inherit;
+    line-height: 1;
 }
 
 .theme-toggle:hover {
-    background: var(--bg-card);
-    color: var(--text);
+    background: var(--bg);
 }
 
-.theme-toggle svg {
-    width: 20px;
-    height: 20px;
+.theme-toggle:focus {
+    outline: none;
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--border-focus) 18%, transparent);
 }
 
-.theme-toggle .icon-moon {
+.theme-symbol {
     display: none;
+    font-size: 1rem;
+    line-height: 1;
 }
 
-:root.dark .theme-toggle .icon-sun {
-    display: none;
-}
-
-:root.dark .theme-toggle .icon-moon {
+.theme-toggle[data-theme-mode="system"] .theme-symbol-system,
+.theme-toggle[data-theme-mode="dark"] .theme-symbol-dark,
+.theme-toggle[data-theme-mode="light"] .theme-symbol-light {
     display: block;
 }

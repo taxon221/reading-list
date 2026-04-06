@@ -503,7 +503,9 @@ function handleShareTarget() {
 }
 
 export function initForm(app) {
-  setupTagInput(dom.tagInput, state.pendingTags, dom.tagsContainer);
+  setupTagInput(dom.tagInput, state.pendingTags, dom.tagsContainer, {
+    preferSuggestionOnTab: true,
+  });
   renderTagPills(state.pendingTags, dom.tagsContainer, dom.tagInput);
 
   initImport(app);

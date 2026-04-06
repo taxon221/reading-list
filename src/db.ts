@@ -94,6 +94,17 @@ function createUsersTable() {
   `);
 }
 
+function createUserPreferencesTable() {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      user_id INTEGER PRIMARY KEY,
+      saved_views TEXT NOT NULL DEFAULT '[]',
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+}
+
 function createItemsTable() {
   db.run(`
     CREATE TABLE IF NOT EXISTS items (
@@ -191,6 +202,9 @@ function migrateTagsTable(bootstrapAdminId: number) {
 }
 
 function createIndexes() {
+  db.run(
+    "CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON user_preferences(user_id)",
+  );
   db.run("CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id)");
   db.run("CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id)");
   db.run(
@@ -256,6 +270,7 @@ export function initDb() {
   try {
     db.transaction(() => {
       createUsersTable();
+      createUserPreferencesTable();
       const bootstrapAdminId = ensureBootstrapAdmin(bootstrapAdminEmail);
 
       syncItemsSchema(bootstrapAdminId);

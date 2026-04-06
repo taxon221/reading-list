@@ -44,6 +44,17 @@ type TagRow = {
   name: string;
 };
 
+type UserPreferencesRow = {
+  user_id: number;
+  saved_views: string;
+};
+
+type SavedViewRecord = {
+  id: string;
+  name: string;
+  filters: Record<string, unknown>;
+};
+
 type AppBindings = {
   Variables: {
     currentUser: CurrentUser;
@@ -274,6 +285,79 @@ function ensureUser(email: string, displayName: string): CurrentUser | null {
   ).run(email, displayName || defaultDisplayName(email), isAdmin);
 
   return findUserByEmail(email);
+}
+
+function normalizeSavedViewName(value: unknown): string {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function sanitizeSavedViewFilters(filters: unknown): Record<string, unknown> {
+  if (!filters || typeof filters !== "object" || Array.isArray(filters)) {
+    return {};
+  }
+
+  return filters as Record<string, unknown>;
+}
+
+function sanitizeSavedViews(savedViews: unknown): SavedViewRecord[] {
+  if (!Array.isArray(savedViews)) return [];
+
+  const seenIds = new Set<string>();
+  const normalized: SavedViewRecord[] = [];
+
+  for (const entry of savedViews) {
+    if (!entry || typeof entry !== "object") continue;
+
+    const name = normalizeSavedViewName((entry as { name?: unknown }).name);
+    if (!name) continue;
+
+    let id = String((entry as { id?: unknown }).id || "").trim().slice(0, 120);
+    if (!id) {
+      id = crypto.randomUUID();
+    }
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    normalized.push({
+      id,
+      name,
+      filters: sanitizeSavedViewFilters((entry as { filters?: unknown }).filters),
+    });
+
+    if (normalized.length >= 100) break;
+  }
+
+  return normalized;
+}
+
+function getUserSavedViews(userId: number): SavedViewRecord[] {
+  const row = db
+    .query("SELECT saved_views FROM user_preferences WHERE user_id = ?")
+    .get(userId) as UserPreferencesRow | undefined;
+
+  if (!row?.saved_views) return [];
+
+  try {
+    return sanitizeSavedViews(JSON.parse(row.saved_views));
+  } catch {
+    return [];
+  }
+}
+
+function setUserSavedViews(userId: number, savedViews: unknown): SavedViewRecord[] {
+  const normalized = sanitizeSavedViews(savedViews);
+
+  db.query(
+    `
+      INSERT INTO user_preferences (user_id, saved_views)
+      VALUES (?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        saved_views = excluded.saved_views,
+        updated_at = CURRENT_TIMESTAMP
+    `,
+  ).run(userId, JSON.stringify(normalized));
+
+  return normalized;
 }
 
 function getOwnedItem(id: string | number | bigint, userId: number) {
@@ -1524,6 +1608,19 @@ app.get("/api/tags", (c) => {
     )
     .all(currentUser.id);
   return c.json(tags);
+});
+
+app.get("/api/preferences/saved-views", (c) => {
+  const currentUser = getCurrentUser(c);
+  return c.json(getUserSavedViews(currentUser.id));
+});
+
+app.put("/api/preferences/saved-views", async (c) => {
+  const currentUser = getCurrentUser(c);
+  const body = await c.req.json().catch(() => ({}));
+  return c.json({
+    savedViews: setUserSavedViews(currentUser.id, body?.savedViews),
+  });
 });
 
 app.post("/api/items", async (c) => {

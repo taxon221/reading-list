@@ -67,6 +67,7 @@ function dropAllTables() {
   for (const table of [
     "item_tags",
     "highlights",
+    "user_preferences",
     "tags_legacy",
     "tags",
     "items",
@@ -269,6 +270,61 @@ describe("auth and user isolation", () => {
       secondUserEmail,
     );
     expect(blockedHighlightDelete.status).toBe(404);
+  });
+
+  test("stores saved views per user account", async () => {
+    createUser(secondUserEmail);
+
+    const adminViews = [
+      {
+        id: "admin-view",
+        name: "Admin only",
+        filters: { selectedTags: ["admin-tag"] },
+      },
+    ];
+    const secondUserViews = [
+      {
+        id: "user2-view",
+        name: "User two only",
+        filters: { selectedTypes: ["article"] },
+      },
+    ];
+
+    const adminSave = await api(
+      "/api/preferences/saved-views",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ savedViews: adminViews }),
+      },
+      bootstrapAdminEmail,
+    );
+    expect(adminSave.status).toBe(200);
+
+    const secondUserSave = await api(
+      "/api/preferences/saved-views",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ savedViews: secondUserViews }),
+      },
+      secondUserEmail,
+    );
+    expect(secondUserSave.status).toBe(200);
+
+    const loadedAdminViews = await apiJson<typeof adminViews>(
+      "/api/preferences/saved-views",
+      {},
+      bootstrapAdminEmail,
+    );
+    expect(loadedAdminViews).toEqual(adminViews);
+
+    const loadedSecondUserViews = await apiJson<typeof secondUserViews>(
+      "/api/preferences/saved-views",
+      {},
+      secondUserEmail,
+    );
+    expect(loadedSecondUserViews).toEqual(secondUserViews);
   });
 
   test("serves uploaded files only to the owning user", async () => {

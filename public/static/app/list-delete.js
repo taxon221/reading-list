@@ -11,6 +11,23 @@ let refreshItems = () => {};
 let refreshTags = () => {};
 let isInitialized = false;
 
+function isMobilePwa() {
+  const standalone =
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    window.navigator.standalone === true;
+  if (!standalone) return false;
+
+  return (
+    window.matchMedia?.("(pointer: coarse)")?.matches ||
+    /android|iphone|ipad|ipod/i.test(window.navigator.userAgent || "")
+  );
+}
+
+function focusDeleteInput() {
+  if (isMobilePwa()) return;
+  dom.deleteValueTextInput?.focus();
+}
+
 export function invalidateListDeleteFacets() {
   hasLoadedDeleteFacets = false;
 }
@@ -117,7 +134,7 @@ async function openDeleteDropdown() {
   closeDropdowns();
   if (isOpen) return;
   dom.deleteDropdown?.classList.add("open");
-  dom.deleteValueTextInput?.focus();
+  focusDeleteInput();
 }
 
 async function confirmDeleteItems() {
@@ -200,7 +217,7 @@ export function initListDelete({
     deleteSelectedValues = [];
     if (dom.deleteValueTextInput) dom.deleteValueTextInput.value = "";
     updateDeleteValueUi();
-    dom.deleteValueTextInput?.focus();
+    focusDeleteInput();
   });
   dom.deleteValueOptions?.addEventListener("change", (event) => {
     const input = event.target.closest('input[type="checkbox"]');

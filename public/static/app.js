@@ -16,6 +16,7 @@ initForm(app);
 app.handleShareTarget?.();
 
 loadAuthUi().then(() => {
+  app.loadSavedViews?.();
   app.loadItems?.();
   app.loadTags?.();
 });
