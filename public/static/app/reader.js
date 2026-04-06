@@ -440,9 +440,7 @@ export function initReader(app) {
 
     iframe.onload = () => {
       readerApi.setupIframeSelectionListener?.();
-      readerApi.applyHighlightsToDocument?.();
-      setTimeout(() => readerApi.applyHighlightsToDocument?.(), 500);
-      setTimeout(() => readerApi.applyHighlightsToDocument?.(), 1400);
+      readerApi.scheduleApplyHighlightsToDocument?.();
     };
   }
 
@@ -474,7 +472,7 @@ export function initReader(app) {
       if (!iframe) return;
       state.readerIframe = iframe;
       readerApi.setupIframeSelectionListener?.();
-      readerApi.applyHighlightsToDocument?.();
+      readerApi.scheduleApplyHighlightsToDocument?.();
     };
 
     const setupMobileDoubleTapZones = (rendition) => {
@@ -798,14 +796,14 @@ export function initReader(app) {
       iframe.onload = () => {
         revokeReaderBlobUrl();
         syncOpenArticleTheme();
-        readerApi.applyHighlightsToDocument?.();
+        readerApi.scheduleApplyHighlightsToDocument?.();
         readerApi.setupIframeSelectionListener?.();
         readerApi.setupArticleProgressTracking?.(itemUrl);
       };
 
       setTimeout(() => {
         syncOpenArticleTheme();
-        readerApi.applyHighlightsToDocument?.();
+        readerApi.scheduleApplyHighlightsToDocument?.();
         readerApi.setupIframeSelectionListener?.();
         readerApi.setupArticleProgressTracking?.(itemUrl);
       }, 100);
@@ -842,6 +840,7 @@ export function initReader(app) {
     state.currentReaderId = null;
     state.readerIframe = null;
     state.currentHighlights = [];
+    state.pendingScrollHighlightId = null;
     readerApi.hideSelectionPopup?.();
     readerApi.closeNoteModal?.();
     unlockBackgroundScroll();

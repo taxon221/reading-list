@@ -42,6 +42,7 @@ export const state = {
   pendingProgressSave: null,
   pendingProgressItemId: null,
   pendingProgressPayload: null,
+  pendingScrollHighlightId: null,
   pendingMobileSelectionCheck: null,
   lockedBodyScrollY: 0,
   articleProgressPoll: null,

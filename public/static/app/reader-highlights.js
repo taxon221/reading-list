@@ -81,48 +81,50 @@ function renderSidebarHighlights() {
   );
 }
 
-function highlightTextInDocument(doc, text) {
+function highlightTextInDocument(doc, text, highlightId = null) {
+  const normalizedSearch = (text || "").replace(/\u00a0/g, " ").trim();
+  if (!normalizedSearch) return;
+
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
-  const normalizedSearchText = text.replace(/\s+/g, " ").trim();
-  const nodesToHighlight = [];
-  let node = null;
-
-  while (true) {
-    node = walker.nextNode();
-    if (!node) break;
-
-    const nodeText = node.textContent || "";
-    const normalizedNodeText = nodeText.replace(/\s+/g, " ");
-
-    if (
-      normalizedSearchText.includes(normalizedNodeText.trim()) ||
-      normalizedNodeText.includes(normalizedSearchText)
-    ) {
-      const index = normalizedNodeText.indexOf(normalizedSearchText);
-      if (index !== -1) {
-        nodesToHighlight.push({
-          index,
-          length: normalizedSearchText.length,
-          node,
-        });
-      }
-    }
+  const nodeData = [];
+  let combined = "";
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+    const norm = (n.textContent || "").replace(/\u00a0/g, " ");
+    nodeData.push({ node: n, normStart: combined.length, normLength: norm.length });
+    combined += norm;
   }
 
-  nodesToHighlight.reverse().forEach(({ node: textNode, index, length }) => {
+  const pattern = normalizedSearch
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s+");
+
+  const match = new RegExp(pattern).exec(combined);
+  if (!match) return;
+
+  const matchStart = match.index;
+  const matchEnd = matchStart + match[0].length;
+
+  const segments = nodeData
+    .filter(e => e.normStart < matchEnd && e.normStart + e.normLength > matchStart)
+    .map(e => ({
+      node: e.node,
+      start: Math.max(0, matchStart - e.normStart),
+      end: Math.min(e.normLength, matchEnd - e.normStart),
+    }))
+    .reverse();
+
+  for (const { node: textNode, start, end } of segments) {
+    if (start >= end) continue;
     try {
       const range = doc.createRange();
-      range.setStart(textNode, index);
-      range.setEnd(
-        textNode,
-        Math.min(index + length, (textNode.textContent || "").length),
-      );
-
+      range.setStart(textNode, start);
+      range.setEnd(textNode, end);
       const span = doc.createElement("span");
       span.className = "reading-list-highlight";
+      if (highlightId !== null) span.dataset.highlightId = String(highlightId);
       range.surroundContents(span);
     } catch {}
-  });
+  }
 }
 
 function applyHighlightsToDocument() {
@@ -134,50 +136,82 @@ function applyHighlightsToDocument() {
     style.id = "reading-list-highlight-style";
     style.textContent = `
       .reading-list-highlight {
-        background-color: rgba(59, 130, 246, 0.3);
-        border-radius: 2px;
-        padding: 0 2px;
-        margin: 0 -2px;
+        background-color: rgba(196, 109, 35, 0.32);
+        background-color: color-mix(in srgb, var(--rl-reader-accent, #c46d23) 38%, transparent);
+        border-radius: 0.2em;
+        padding: 0.06em 0.12em;
+        margin: 0 -0.06em;
+        box-decoration-break: clone;
+        -webkit-box-decoration-break: clone;
       }
       .reading-list-highlight:hover {
-        background-color: rgba(59, 130, 246, 0.5);
+        background-color: rgba(196, 109, 35, 0.45);
+        background-color: color-mix(in srgb, var(--rl-reader-accent, #c46d23) 52%, transparent);
       }
     `;
     doc.head.appendChild(style);
   }
 
+  const highlightParents = new Set();
   doc.querySelectorAll(".reading-list-highlight").forEach((element) => {
     const parent = element.parentNode;
     if (!parent) return;
-
     while (element.firstChild) {
       parent.insertBefore(element.firstChild, element);
     }
-
     parent.removeChild(element);
+    highlightParents.add(parent);
   });
+  for (const p of highlightParents) p.normalize();
 
   for (const highlight of state.currentHighlights) {
-    highlightTextInDocument(doc, highlight.selected_text);
+    highlightTextInDocument(doc, highlight.selected_text, highlight.id);
   }
 }
 
-function scrollToHighlight(highlightId) {
-  const highlight = state.currentHighlights.find((item) => item.id === highlightId);
+function applyAndMaybeScroll() {
+  applyHighlightsToDocument();
+  if (!state.pendingScrollHighlightId) return;
+  const id = state.pendingScrollHighlightId;
   const doc = getIframeDocument(state.readerIframe);
-  if (!highlight || !doc) return;
+  if (!doc?.querySelector(`[data-highlight-id="${id}"]`)) return;
+  scrollToHighlight(id);
+}
 
-  const searchText = highlight.selected_text.slice(0, 50);
-  for (const element of doc.querySelectorAll(".reading-list-highlight")) {
-    if (!element.textContent.includes(searchText)) continue;
+function scheduleApplyHighlightsToDocument() {
+  applyAndMaybeScroll();
+  if (state.currentHighlights.length === 0) return;
 
-    element.scrollIntoView({ behavior: "smooth", block: "center" });
-    element.style.backgroundColor = "rgba(59, 130, 246, 0.7)";
-    setTimeout(() => {
-      element.style.backgroundColor = "";
-    }, 1000);
-    break;
+  for (const ms of [80, 200, 450, 900, 1600]) {
+    setTimeout(applyAndMaybeScroll, ms);
   }
+
+  if (state.pendingScrollHighlightId) {
+    setTimeout(() => { state.pendingScrollHighlightId = null; }, 500);
+  }
+
+  const hookFonts = () => {
+    const iframeDoc = getIframeDocument(state.readerIframe);
+    if (iframeDoc?.fonts?.ready) {
+      void iframeDoc.fonts.ready.then(applyAndMaybeScroll);
+    }
+  };
+  hookFonts();
+  setTimeout(hookFonts, 120);
+}
+
+function scrollToHighlight(highlightId) {
+  const doc = getIframeDocument(state.readerIframe);
+  if (!doc) return;
+
+  const element = doc.querySelector(`[data-highlight-id="${highlightId}"]`);
+  if (!element) return;
+
+  element.scrollIntoView({ behavior: "smooth", block: "center" });
+  doc.querySelectorAll(`[data-highlight-id="${highlightId}"]`).forEach(el => {
+    el.style.backgroundColor = "color-mix(in srgb, var(--rl-reader-accent, #c46d23) 58%, transparent)";
+    setTimeout(() => { el.style.backgroundColor = ""; }, 1000);
+  });
 }
 
 function clearIframeSelection() {
@@ -401,6 +435,12 @@ function createHighlightCard(highlight) {
   const quote = document.createElement("div");
   quote.className = "highlight-card-quote";
   quote.textContent = highlight.selected_text;
+  quote.dataset.action = "open-at-highlight";
+  quote.dataset.id = String(highlight.id);
+  quote.dataset.itemId = String(highlight.item_id);
+  quote.dataset.itemUrl = highlight.item_url || "";
+  quote.dataset.itemTitle = highlight.item_title || "";
+  quote.dataset.itemType = highlight.item_type || "article";
 
   const actions = document.createElement("div");
   actions.className = "highlight-card-actions";
@@ -550,6 +590,20 @@ export function initReaderHighlights(app, readerApi) {
       return;
     }
 
+    if (actionEl.dataset.action === "open-at-highlight") {
+      event.preventDefault();
+      const highlightId = Number(actionEl.dataset.id);
+      state.pendingScrollHighlightId = highlightId;
+      app.showView?.("reading-list");
+      await readerApi.openReader?.(
+        Number(actionEl.dataset.itemId),
+        actionEl.dataset.itemUrl || "",
+        actionEl.dataset.itemTitle || "",
+        actionEl.dataset.itemType || "article",
+      );
+      return;
+    }
+
     const highlightId = Number(actionEl.dataset.id);
     const highlight = state.allHighlights.find((item) => item.id === highlightId);
     if (!highlight) return;
@@ -652,7 +706,7 @@ export function initReaderHighlights(app, readerApi) {
   app.loadAllHighlights = loadAllHighlights;
 
   return {
-    applyHighlightsToDocument,
+    scheduleApplyHighlightsToDocument,
     closeNoteModal,
     hideSelectionPopup,
     loadAllHighlights,

@@ -820,6 +820,13 @@
     font-size: 0.875rem;
     line-height: 1.6;
     color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.highlight-card-quote:hover {
+    background: var(--bg-hover, var(--surface));
+    border-left-color: var(--accent-hover, var(--accent));
 }
 
 .highlight-card-note {
