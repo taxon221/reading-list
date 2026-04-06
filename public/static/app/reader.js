@@ -5,6 +5,7 @@ import {
   getAuthorizedItemUrl,
   getItemProgressInfo,
   isMobileViewport,
+  shouldIgnoreKeyboardShortcut,
   withTimeout,
 } from "./utils.js";
 import { initReaderHighlights } from "./reader-highlights.js";
@@ -99,6 +100,17 @@ function setReaderSidebarOpen(isOpen) {
 
   dom.readerSidebar.classList.toggle("hidden", !isOpen);
   dom.readerToggleNotes.classList.toggle("active", isOpen);
+}
+
+function openReaderOriginal() {
+  const link = dom.readerOpenOriginal;
+  const href = link?.href || link?.getAttribute?.("href");
+  if (!href || href === "#") return;
+  window.open(href, "_blank", "noopener,noreferrer");
+}
+
+function toggleReaderSidebar() {
+  setReaderSidebarOpen(Boolean(dom.readerSidebar?.classList.contains("hidden")));
 }
 
 function resetEpubReader() {
@@ -393,6 +405,8 @@ function getArticleReaderTheme() {
 export function initReader(app) {
   const readerApi = {
     setReaderSidebarOpen,
+    openReaderOriginal,
+    toggleReaderSidebar,
   };
   Object.assign(readerApi, initReaderProgress());
   Object.assign(readerApi, initReaderHighlights(app, readerApi));
@@ -862,11 +876,27 @@ export function initReader(app) {
   });
 
   document.addEventListener("keydown", (event) => {
+    const readerOpen = dom.readerModal && dom.readerModal.style.display !== "none";
+
+    if (readerOpen && !shouldIgnoreKeyboardShortcut(event)) {
+      const k = event.key.toLowerCase();
+      if (k === "o") {
+        event.preventDefault();
+        openReaderOriginal();
+        return;
+      }
+      if (k === "h") {
+        event.preventDefault();
+        toggleReaderSidebar();
+        return;
+      }
+    }
+
     if (event.key !== "Escape") return;
 
     if (dom.noteModal && dom.noteModal.style.display !== "none") {
       readerApi.closeNoteModal?.();
-    } else if (dom.readerModal && dom.readerModal.style.display !== "none") {
+    } else if (readerOpen) {
       closeReader();
     } else if (dom.editModal && dom.editModal.style.display !== "none") {
       app.closeEditModal?.();

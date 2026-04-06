@@ -669,6 +669,18 @@ export function extractUrlFromText(text) {
   return match ? match[0] : "";
 }
 
+export function shouldIgnoreKeyboardShortcut(event) {
+  if (event.defaultPrevented) return true;
+  if (event.metaKey || event.ctrlKey || event.altKey) return true;
+  const el = event.target;
+  if (!el || el.nodeType !== 1) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (el.closest?.("[contenteditable='true']")) return true;
+  return false;
+}
+
 export function getIframeDocument(iframe) {
   return iframe?.contentDocument || iframe?.contentWindow?.document || null;
 }

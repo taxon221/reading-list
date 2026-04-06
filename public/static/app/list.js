@@ -8,6 +8,7 @@ import {
   renderItemProgressMeta,
   renderTagPills,
   setupTagInput,
+  shouldIgnoreKeyboardShortcut,
 } from "./utils.js";
 import { initListDelete, invalidateListDeleteFacets } from "./list-delete.js";
 import { applyListSearch, initListSearch, syncListSearchUi } from "./list-search.js";
@@ -1249,4 +1250,28 @@ export function initList(app) {
     typeValues: DELETE_TYPE_VALUES,
   });
   syncListSearchUi(DELETE_TYPE_VALUES);
+
+  function listShortcutsBlocked() {
+    if (dom.readerModal && dom.readerModal.style.display !== "none") return true;
+    if (dom.noteModal && dom.noteModal.style.display !== "none") return true;
+    if (dom.editModal && dom.editModal.style.display !== "none") return true;
+    if (dom.saveViewModal && dom.saveViewModal.style.display !== "none") return true;
+    if (dom.accountModalOverlay && !dom.accountModalOverlay.hidden) return true;
+    return false;
+  }
+
+  document.addEventListener("keydown", (event) => {
+    const k = event.key.toLowerCase();
+    if (k !== "s" && k !== "a") return;
+    if (shouldIgnoreKeyboardShortcut(event)) return;
+    if (listShortcutsBlocked()) return;
+    if (state.isUnauthorized) return;
+    event.preventDefault();
+    showView("reading-list");
+    if (k === "s") {
+      dom.searchInput?.focus();
+    } else {
+      dom.urlInput?.focus();
+    }
+  });
 }

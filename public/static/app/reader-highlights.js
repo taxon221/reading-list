@@ -4,6 +4,7 @@ import {
   formatDate,
   getIframeDocument,
   isMobileViewport,
+  shouldIgnoreKeyboardShortcut,
 } from "./utils.js";
 
 function getActiveSelectionText(doc) {
@@ -370,7 +371,7 @@ function startMobileSelectionPoll() {
   }, 180);
 }
 
-function setupIframeSelectionListener() {
+function setupIframeSelectionListener(readerApi) {
   const doc = getIframeDocument(state.readerIframe);
   if (!doc?.documentElement) return;
   if (doc.documentElement.dataset.rlSelectionBound === "1") return;
@@ -385,6 +386,19 @@ function setupIframeSelectionListener() {
   doc.addEventListener("contextmenu", scheduleMobileSelectionProbe);
   doc.addEventListener("pointerdown", () => {
     setTimeout(handleIframeSelection, 50);
+  });
+  doc.addEventListener("keydown", (event) => {
+    if (shouldIgnoreKeyboardShortcut(event)) return;
+    const k = event.key.toLowerCase();
+    if (k === "o") {
+      event.preventDefault();
+      readerApi.openReaderOriginal?.();
+      return;
+    }
+    if (k === "h") {
+      event.preventDefault();
+      readerApi.toggleReaderSidebar?.();
+    }
   });
   startMobileSelectionPoll();
 }
@@ -712,7 +726,7 @@ export function initReaderHighlights(app, readerApi) {
     loadAllHighlights,
     loadHighlights,
     renderSidebarHighlights,
-    setupIframeSelectionListener,
+    setupIframeSelectionListener: () => setupIframeSelectionListener(readerApi),
     stopMobileSelectionPoll,
   };
 }
