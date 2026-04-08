@@ -568,6 +568,73 @@ function createItemActionButton({ action, className, title, icon }) {
   return button;
 }
 
+function buildThumbPlaceholder(type) {
+  const icon = createSvgIcon(
+    {
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "2",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+    },
+    type === "video"
+      ? [
+          { name: "rect", attributes: { x: "3", y: "6", width: "13", height: "12", rx: "2" } },
+          { name: "path", attributes: { d: "M16 10l5-3v10l-5-3z" } },
+        ]
+      : type === "podcast"
+        ? [
+            { name: "path", attributes: { d: "M12 18v3" } },
+            { name: "path", attributes: { d: "M8 11a4 4 0 118 0 4 4 0 01-8 0z" } },
+            { name: "path", attributes: { d: "M5 9a7 7 0 0114 0" } },
+            { name: "path", attributes: { d: "M2 9a10 10 0 0120 0" } },
+          ]
+        : type === "pdf"
+          ? [
+              { name: "path", attributes: { d: "M14 2H7a2 2 0 00-2 2v16a2 2 0 002 2h10a2 2 0 002-2V7z" } },
+              { name: "path", attributes: { d: "M14 2v5h5" } },
+            ]
+          : type === "ebook"
+            ? [
+                { name: "path", attributes: { d: "M4 19.5A2.5 2.5 0 016.5 17H20" } },
+                { name: "path", attributes: { d: "M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" } },
+              ]
+            : [
+                { name: "path", attributes: { d: "M14 2H7a2 2 0 00-2 2v16a2 2 0 002 2h10a2 2 0 002-2V7z" } },
+                { name: "path", attributes: { d: "M14 2v5h5" } },
+                { name: "path", attributes: { d: "M9 13h6" } },
+                { name: "path", attributes: { d: "M9 17h6" } },
+              ],
+  );
+
+  const span = document.createElement("span");
+  span.className = `item-thumb-fallback type-${type}`;
+  span.setAttribute("aria-hidden", "true");
+  span.appendChild(icon);
+  return span;
+}
+
+function buildThumbContent(type, domainStr, url) {
+  if (!URL.canParse(url)) return buildThumbPlaceholder(type);
+
+  const parsedUrl = new URL(url);
+  const hostname = parsedUrl.hostname;
+
+  const img = document.createElement("img");
+  img.className = "item-thumb";
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.alt = "";
+  img.setAttribute("aria-hidden", "true");
+  img.src = `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(parsedUrl.origin)}&sz=32`;
+  img.onerror = () => {
+    img.onerror = () => { img.replaceWith(buildThumbPlaceholder(type)); };
+    img.src = `https://icons.duckduckgo.com/ip3/${hostname}.ico`;
+  };
+  return img;
+}
+
 function createItemElement(item) {
   const article = document.createElement("article");
   article.className = item.is_read ? "item read" : "item";
@@ -590,7 +657,8 @@ function createItemElement(item) {
   left.append(type, date);
 
   const progress = renderItemProgressMeta(item);
-  if (progress) left.appendChild(progress);
+  const useNewLayout = !isMobilePwa();
+  if (!useNewLayout && progress) left.appendChild(progress);
 
   const right = document.createElement("div");
   right.className = "item-col-right";
@@ -729,6 +797,16 @@ function createItemElement(item) {
   });
 
   actions.append(actionRow, moreButton);
+
+  if (useNewLayout) {
+    article.classList.add("has-thumb");
+    const thumbCol = document.createElement("div");
+    thumbCol.className = "item-thumb-col";
+    thumbCol.appendChild(buildThumbContent(item.type, domainStr, item.url || ""));
+    content.prepend(thumbCol);
+    if (progress) content.appendChild(progress);
+  }
+
   article.append(content, actions);
   return article;
 }
