@@ -540,6 +540,70 @@ function parseAuthor(html: string): string | null {
   return null;
 }
 
+function normalizePreviewImageUrl(sourceUrl: string, value: string | null): string | null {
+  const trimmed = decodeHtmlEntities(String(value || "").trim());
+  if (!trimmed) return null;
+  if (
+    trimmed.startsWith("data:") ||
+    trimmed.startsWith("blob:") ||
+    trimmed.startsWith("javascript:")
+  ) {
+    return null;
+  }
+
+  try {
+    return absoluteAttributeUrl(new URL(sourceUrl), trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function getPreviewImageCandidateValue(
+  document: Document,
+  selector: string,
+): string | null {
+  const node = document.querySelector(selector);
+  if (!node) return null;
+
+  if (node.tagName === "META") return node.getAttribute("content");
+  if (node.tagName === "LINK") return node.getAttribute("href");
+  return node.getAttribute("src");
+}
+
+function parsePreviewImage(html: string, sourceUrl: string): string | null {
+  const virtualConsole = new VirtualConsole();
+  const dom = new JSDOM(html, { url: sourceUrl, virtualConsole });
+  const { document } = dom.window;
+
+  const prioritizedSelectors = [
+    'meta[property="og:image:secure_url"]',
+    'meta[property="og:image"]',
+    'meta[name="twitter:image"]',
+    'meta[name="twitter:image:src"]',
+    'link[rel="image_src"]',
+  ];
+
+  for (const selector of prioritizedSelectors) {
+    const normalized = normalizePreviewImageUrl(
+      sourceUrl,
+      getPreviewImageCandidateValue(document, selector),
+    );
+    if (normalized) return normalized;
+  }
+
+  const imageNodes = document.querySelectorAll("article img[src], main img[src], img[src]");
+  const candidates = Array.from(imageNodes, (node) => node as Element).slice(0, 8);
+  for (const node of candidates) {
+    const rawSrc = node.getAttribute("src");
+    const normalized = normalizePreviewImageUrl(sourceUrl, rawSrc);
+    if (!normalized) continue;
+    if (/\b(icon|logo|avatar)\b/i.test(normalized)) continue;
+    return normalized;
+  }
+
+  return null;
+}
+
 function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&amp;/g, "&")
@@ -990,6 +1054,7 @@ app.get("/api/fetch-meta", async (c) => {
     const type = detectType(safeUrl, contentType);
     let title: string | null = null;
     let author: string | null = null;
+    let image: string | null = null;
 
     if (
       contentType.includes("text/html") ||
@@ -998,6 +1063,7 @@ app.get("/api/fetch-meta", async (c) => {
       const html = await response.text();
       title = parseTitle(html);
       author = parseAuthor(html);
+      image = parsePreviewImage(html, safeUrl);
     }
 
     if (!title) {
@@ -1008,7 +1074,7 @@ app.get("/api/fetch-meta", async (c) => {
       }
     }
 
-    return c.json({ title, type, author });
+    return c.json({ title, type, author, image });
   } catch {
     let fallbackTitle = safeUrl;
     try {
@@ -1020,6 +1086,7 @@ app.get("/api/fetch-meta", async (c) => {
       title: fallbackTitle,
       type: detectType(safeUrl),
       author: null,
+      image: null,
     });
   }
 });

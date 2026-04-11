@@ -568,6 +568,9 @@ function createItemActionButton({ action, className, title, icon }) {
   return button;
 }
 
+const itemPreviewCache = new Map();
+let itemPreviewObserver = null;
+
 function buildThumbPlaceholder(type) {
   const icon = createSvgIcon(
     {
@@ -615,23 +618,146 @@ function buildThumbPlaceholder(type) {
   return span;
 }
 
-function buildThumbContent(type, domainStr, url) {
-  if (!URL.canParse(url)) return buildThumbPlaceholder(type);
+function getThumbIconSources(url) {
+  if (!URL.canParse(url)) return null;
 
   const parsedUrl = new URL(url);
-  const hostname = parsedUrl.hostname;
+  return {
+    primary: `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(parsedUrl.origin)}&sz=64`,
+    fallback: `https://icons.duckduckgo.com/ip3/${parsedUrl.hostname}.ico`,
+  };
+}
+
+function applyThumbIcon(img) {
+  const primary = img.dataset.iconPrimary || "";
+  const fallback = img.dataset.iconFallback || "";
+  const type = img.dataset.type || "article";
+  if (!primary) {
+    img.replaceWith(buildThumbPlaceholder(type));
+    return;
+  }
+
+  img.classList.remove("is-preview");
+  img.classList.add("is-icon");
+  img.onerror = () => {
+    if (fallback && img.src !== fallback) {
+      img.onerror = () => { img.replaceWith(buildThumbPlaceholder(type)); };
+      img.src = fallback;
+      return;
+    }
+    img.replaceWith(buildThumbPlaceholder(type));
+  };
+  img.src = primary;
+}
+
+function applyThumbPreview(img, previewUrl) {
+  const type = img.dataset.type || "article";
+  img.classList.remove("is-icon");
+  img.classList.add("is-preview");
+  img.onerror = () => {
+    applyThumbIcon(img);
+    if (!img.isConnected) return;
+    if (!img.src) img.replaceWith(buildThumbPlaceholder(type));
+  };
+  img.src = previewUrl;
+}
+
+async function fetchItemPreview(url) {
+  const cached = itemPreviewCache.get(url);
+  if (cached !== undefined) return await Promise.resolve(cached);
+
+  const request = fetch(`/api/fetch-meta?url=${encodeURIComponent(url)}`)
+    .then((response) => {
+      if (!response?.ok) return "";
+      return response.json();
+    })
+    .then((data) => {
+      const image = String(data?.image || "").trim();
+      return image && URL.canParse(image) ? image : "";
+    })
+    .catch(() => "");
+
+  itemPreviewCache.set(url, request);
+  const resolved = await request;
+  itemPreviewCache.set(url, resolved);
+  return resolved;
+}
+
+async function loadThumbPreview(img) {
+  if (!(img instanceof HTMLImageElement)) return;
+  if (img.dataset.previewState === "loading" || img.dataset.previewState === "loaded") return;
+
+  const previewUrl = img.dataset.previewUrl || "";
+  if (!previewUrl) return;
+
+  img.dataset.previewState = "loading";
+  const resolvedPreviewUrl = await fetchItemPreview(previewUrl);
+
+  if (!img.isConnected) return;
+  img.dataset.previewState = "loaded";
+
+  if (resolvedPreviewUrl) {
+    applyThumbPreview(img, resolvedPreviewUrl);
+    return;
+  }
+
+  applyThumbIcon(img);
+}
+
+function getItemPreviewObserver() {
+  if (itemPreviewObserver || isMobilePwa() || typeof IntersectionObserver === "undefined") {
+    return itemPreviewObserver;
+  }
+
+  itemPreviewObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        itemPreviewObserver?.unobserve(entry.target);
+        loadThumbPreview(entry.target);
+      });
+    },
+    { rootMargin: "200px 0px" },
+  );
+
+  return itemPreviewObserver;
+}
+
+function activateVisibleThumbPreviews() {
+  const thumbs = dom.itemsList?.querySelectorAll(".item-thumb[data-preview-url]");
+  if (!thumbs?.length) return;
+
+  const observer = getItemPreviewObserver();
+  thumbs.forEach((thumb) => {
+    if (thumb.dataset.previewObserved === "true") return;
+    thumb.dataset.previewObserved = "true";
+
+    if (observer) {
+      observer.observe(thumb);
+      return;
+    }
+
+    loadThumbPreview(thumb);
+  });
+}
+
+function buildThumbContent(type, url) {
+  if (!URL.canParse(url)) return buildThumbPlaceholder(type);
+
+  const iconSources = getThumbIconSources(url);
+  if (!iconSources) return buildThumbPlaceholder(type);
 
   const img = document.createElement("img");
-  img.className = "item-thumb";
+  img.className = "item-thumb is-icon";
   img.loading = "lazy";
   img.decoding = "async";
   img.alt = "";
   img.setAttribute("aria-hidden", "true");
-  img.src = `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(parsedUrl.origin)}&sz=32`;
-  img.onerror = () => {
-    img.onerror = () => { img.replaceWith(buildThumbPlaceholder(type)); };
-    img.src = `https://icons.duckduckgo.com/ip3/${hostname}.ico`;
-  };
+  img.dataset.previewUrl = url;
+  img.dataset.type = type;
+  img.dataset.iconPrimary = iconSources.primary;
+  img.dataset.iconFallback = iconSources.fallback;
+  applyThumbIcon(img);
   return img;
 }
 
@@ -802,7 +928,7 @@ function createItemElement(item) {
     article.classList.add("has-thumb");
     const thumbCol = document.createElement("div");
     thumbCol.className = "item-thumb-col";
-    thumbCol.appendChild(buildThumbContent(item.type, domainStr, item.url || ""));
+    thumbCol.appendChild(buildThumbContent(item.type, item.url || ""));
     content.prepend(thumbCol);
     if (progress) content.appendChild(progress);
   }
@@ -819,6 +945,7 @@ function renderItems(items) {
     );
   } else {
     dom.itemsList.replaceChildren(...items.map(createItemElement));
+    activateVisibleThumbPreviews();
   }
 }
 
