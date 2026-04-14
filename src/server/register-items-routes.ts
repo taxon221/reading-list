@@ -14,6 +14,33 @@ import {
 } from "./item-store";
 import type { AppBindings, ItemRow } from "./types";
 
+function shouldAutoMarkRead(progress: unknown) {
+	if (!progress || typeof progress !== "object") return false;
+
+	const value = progress as {
+		kind?: unknown;
+		ratio?: unknown;
+		percentage?: unknown;
+		page?: unknown;
+		total?: unknown;
+	};
+	const kind = typeof value.kind === "string" ? value.kind : "";
+	if (!["article", "pdf", "epub"].includes(kind)) return false;
+
+	const ratio =
+		typeof value.ratio === "number"
+			? value.ratio
+			: typeof value.percentage === "number"
+				? value.percentage
+				: typeof value.page === "number" &&
+					  typeof value.total === "number" &&
+					  value.total > 0
+					? value.page / value.total
+					: 0;
+
+	return ratio >= 0.99;
+}
+
 export function registerItemRoutes(app: Hono<AppBindings>) {
 	app.get("/api/items", (c) => {
 		const currentUser = getCurrentUser(c);
@@ -245,6 +272,14 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		db.query(
 			"UPDATE items SET reading_progress = ? WHERE id = ? AND user_id = ?",
 		).run(serialized, id, currentUser.id);
+
+		const autoMarkedRead = shouldAutoMarkRead(progress);
+		if (autoMarkedRead) {
+			db.query("UPDATE items SET is_read = 1 WHERE id = ? AND user_id = ?").run(
+				id,
+				currentUser.id,
+			);
+		}
 
 		return c.json({ success: true });
 	});

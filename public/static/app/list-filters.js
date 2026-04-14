@@ -136,6 +136,12 @@ export function createListFilters({ refreshList }) {
 					),
 			);
 		}
+		if (state.readStatus === "read") {
+			result = result.filter((item) => Boolean(item.is_read));
+		}
+		if (state.readStatus === "unread") {
+			result = result.filter((item) => !item.is_read);
+		}
 		return result;
 	}
 

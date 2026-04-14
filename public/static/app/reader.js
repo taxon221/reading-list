@@ -227,6 +227,11 @@ export function initReader(app) {
 				toggleReaderSidebar();
 				return;
 			}
+			if (key === "t" && state.currentReaderId) {
+				event.preventDefault();
+				app.openEditModal?.(state.currentReaderId, { focusTagInput: true });
+				return;
+			}
 		}
 
 		if (event.key !== "Escape") return;

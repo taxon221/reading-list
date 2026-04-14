@@ -4,6 +4,19 @@ import {
 } from "./list-constants.js";
 import { dom, handleAuthFailure, state } from "./shared.js";
 
+const BUILT_IN_VIEWS = Object.freeze([
+	{
+		id: "builtin-unread",
+		name: "Unread",
+		filters: { readStatus: "unread" },
+	},
+	{
+		id: "builtin-read",
+		name: "Read",
+		filters: { readStatus: "read" },
+	},
+]);
+
 function normalizeViewName(value) {
 	return String(value || "")
 		.replace(/\s+/g, " ")
@@ -58,6 +71,10 @@ function sanitizeSearchToken(token) {
 }
 
 function sanitizeSavedViewFilters(filters = {}) {
+	const readStatus =
+		filters.readStatus === "read" || filters.readStatus === "unread"
+			? filters.readStatus
+			: "all";
 	const selectedTypes = sanitizeStringArray(filters.selectedTypes, {
 		lowercase: true,
 	}).filter((value) => DELETE_TYPE_VALUES.includes(value));
@@ -82,6 +99,7 @@ function sanitizeSavedViewFilters(filters = {}) {
 	);
 
 	return {
+		readStatus,
 		selectedTypes,
 		selectedTags,
 		excludedTags,
@@ -120,6 +138,7 @@ function sanitizeSavedView(view) {
 
 function getCurrentSavedViewFilters() {
 	return sanitizeSavedViewFilters({
+		readStatus: state.readStatus,
 		selectedTypes: state.selectedTypes,
 		selectedTags: state.selectedTags,
 		excludedTags: state.excludedTags,
@@ -149,6 +168,7 @@ function getSearchTokenSignature(token) {
 function buildSavedViewSignature(filters) {
 	const snapshot = sanitizeSavedViewFilters(filters);
 	return JSON.stringify({
+		readStatus: snapshot.readStatus,
 		selectedTypes: sortValues(snapshot.selectedTypes),
 		selectedTags: sortValues(snapshot.selectedTags),
 		excludedTags: sortValues(snapshot.excludedTags),
@@ -202,6 +222,14 @@ function mergeSavedViews(primaryViews, secondaryViews) {
 	});
 
 	return merged;
+}
+
+function getAllViews() {
+	return [...BUILT_IN_VIEWS, ...state.savedViews];
+}
+
+function getViewsForMatching() {
+	return [...state.savedViews, ...BUILT_IN_VIEWS];
 }
 
 export function createSavedViews({ closeAllDropdowns, refreshList }) {
@@ -266,7 +294,7 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 
 	function updateViewsFilterDisplay() {
 		if (!dom.viewsFilterValue) return;
-		const activeView = state.savedViews.find(
+		const activeView = getAllViews().find(
 			(view) => view.id === state.activeSavedViewId,
 		);
 		dom.viewsFilterValue.textContent = activeView?.name || "None";
@@ -305,7 +333,8 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 	function renderSavedViewOptions() {
 		if (!dom.viewsOptions) return;
 
-		if (state.savedViews.length === 0) {
+		const allViews = getAllViews();
+		if (allViews.length === 0) {
 			const empty = document.createElement("div");
 			empty.className = "dropdown-empty";
 			empty.textContent = "No saved views yet";
@@ -313,7 +342,8 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 			return;
 		}
 
-		const options = state.savedViews.map((view) => {
+		const options = allViews.map((view) => {
+			const isBuiltIn = BUILT_IN_VIEWS.some((entry) => entry.id === view.id);
 			const row = document.createElement("label");
 			row.className = "dropdown-option";
 			row.dataset.value = view.id;
@@ -335,19 +365,21 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 
 			labelWrap.append(checkbox, text);
 
-			const removeButton = document.createElement("button");
-			removeButton.type = "button";
-			removeButton.className = "view-option-remove";
-			removeButton.textContent = "×";
-			removeButton.title = `Delete ${view.name}`;
-			removeButton.setAttribute("aria-label", `Delete saved view ${view.name}`);
-			removeButton.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				removeSavedView(view.id);
-			});
-
-			content.append(labelWrap, removeButton);
+			content.append(labelWrap);
+			if (!isBuiltIn) {
+				const removeButton = document.createElement("button");
+				removeButton.type = "button";
+				removeButton.className = "view-option-remove";
+				removeButton.textContent = "×";
+				removeButton.title = `Delete ${view.name}`;
+				removeButton.setAttribute("aria-label", `Delete saved view ${view.name}`);
+				removeButton.addEventListener("click", (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					removeSavedView(view.id);
+				});
+				content.append(removeButton);
+			}
 			row.appendChild(content);
 			row.addEventListener("click", (event) => {
 				event.preventDefault();
@@ -369,7 +401,7 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 			getCurrentSavedViewFilters(),
 		);
 		const nextActiveId =
-			state.savedViews.find(
+			getViewsForMatching().find(
 				(view) => buildSavedViewSignature(view.filters) === currentSignature,
 			)?.id || "";
 
@@ -379,6 +411,7 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 	}
 
 	function clearActiveView() {
+		state.readStatus = "all";
 		state.selectedTypes = [];
 		state.selectedTags = [];
 		state.excludedTags = [];
@@ -397,10 +430,11 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 	}
 
 	function applySavedView(viewId) {
-		const view = state.savedViews.find((entry) => entry.id === viewId);
+		const view = getAllViews().find((entry) => entry.id === viewId);
 		if (!view) return;
 
 		const filters = sanitizeSavedViewFilters(view.filters);
+		state.readStatus = filters.readStatus;
 		state.selectedTypes = filters.selectedTypes;
 		state.selectedTags = filters.selectedTags;
 		state.excludedTags = filters.excludedTags;

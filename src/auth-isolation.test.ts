@@ -333,6 +333,65 @@ describe("auth and user isolation", () => {
 		expect(loadedSecondUserViews).toEqual(secondUserViews);
 	});
 
+	test("auto-marks items read from progress without affecting other users", async () => {
+		createUser(secondUserEmail);
+
+		const adminCreate = await apiJson<{ id: number }>(
+			"/api/items",
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					url: "https://example.com/admin-read",
+					title: "Admin read item",
+				}),
+			},
+			bootstrapAdminEmail,
+		);
+
+		await apiJson<{ id: number }>(
+			"/api/items",
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					url: "https://example.com/user2-unread",
+					title: "User two unread item",
+				}),
+			},
+			secondUserEmail,
+		);
+
+		await api(
+			`/api/items/${adminCreate.id}/progress`,
+			{
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					progress: { kind: "article", ratio: 1 },
+				}),
+			},
+			bootstrapAdminEmail,
+		);
+
+		const adminItems = await apiJson<Array<{ id: number; is_read: number }>>(
+			"/api/items",
+			{},
+			bootstrapAdminEmail,
+		);
+		expect(adminItems).toHaveLength(1);
+		expect(adminItems[0]?.id).toBe(adminCreate.id);
+		expect(adminItems[0]?.is_read).toBe(1);
+
+		const secondUserItems = await apiJson<Array<{ is_read: number }>>(
+			"/api/items",
+			{},
+			secondUserEmail,
+		);
+		expect(secondUserItems).toHaveLength(1);
+		expect(secondUserItems[0]?.is_read).toBe(0);
+	});
+
 	test("serves uploaded files only to the owning user", async () => {
 		createUser(secondUserEmail);
 		mkdirSync(join(testDataDir, "uploads"), { recursive: true });

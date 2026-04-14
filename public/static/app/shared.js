@@ -14,6 +14,7 @@ export const state = {
 	selectedTypes: [],
 	selectedTags: [],
 	excludedTags: [],
+	readStatus: "all",
 	selectedDomains: [],
 	excludedDomains: [],
 	selectedAuthors: [],

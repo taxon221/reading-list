@@ -79,7 +79,7 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 		loadTags();
 	}
 
-	async function openEditModal(id) {
+	async function openEditModal(id, options = {}) {
 		if (state.isUnauthorized) return;
 
 		const response = await fetch(`/api/items/${id}`).catch(() => null);
@@ -101,6 +101,11 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 		}
 		renderTagPills(state.editTags, dom.editTagsContainer, dom.editTagInput);
 		dom.editModal.style.display = "flex";
+		if (options.focusTagInput) {
+			window.requestAnimationFrame(() => {
+				dom.editTagInput?.focus();
+			});
+		}
 	}
 
 	function closeEditModal() {
@@ -231,5 +236,6 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 		initEditModal,
 		initItemMenu,
 		initItemsList,
+		openEditModal,
 	};
 }

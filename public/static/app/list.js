@@ -43,6 +43,7 @@ export function initList(app) {
 	app.loadTags = loadTags;
 	app.showView = showView;
 	app.closeEditModal = editing.closeEditModal;
+	app.openEditModal = editing.openEditModal;
 	app.closeItemMenu = editing.closeItemMenu;
 
 	function renderCurrentItems() {
