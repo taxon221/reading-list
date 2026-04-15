@@ -50,7 +50,7 @@ export const state = {
 	mobileSelectionPoll: null,
 	mobilePopupDismissTimer: null,
 	savedViews: [],
-	activeSavedViewId: "",
+	activeSavedViewIds: [],
 };
 
 export const dom = {

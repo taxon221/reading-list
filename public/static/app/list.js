@@ -3,7 +3,7 @@ import { initListDelete, invalidateListDeleteFacets } from "./list-delete.js";
 import { createListEditing } from "./list-edit.js";
 import { createListFilters } from "./list-filters.js";
 import { createListRenderer } from "./list-render.js";
-import { createSavedViews } from "./list-saved-views.js";
+import { createSavedViews, getCurrentFilters } from "./list-saved-views.js";
 import { initListSearch, syncListSearchUi } from "./list-search.js";
 import { dom, handleAuthFailure, state } from "./shared.js";
 import { shouldIgnoreKeyboardShortcut } from "./utils.js";
@@ -74,14 +74,15 @@ export function initList(app) {
 	async function loadItems() {
 		if (state.isUnauthorized) return;
 
+		const filtersState = getCurrentFilters();
 		const params = new URLSearchParams();
-		if (state.selectedTags.length > 0)
-			params.set("tags", state.selectedTags.join(","));
-		if (state.excludedTags.length > 0) {
-			params.set("exclude_tags", state.excludedTags.join(","));
+		if (filtersState.selectedTags.length > 0)
+			params.set("tags", filtersState.selectedTags.join(","));
+		if (filtersState.excludedTags.length > 0) {
+			params.set("exclude_tags", filtersState.excludedTags.join(","));
 		}
-		if (state.selectedTypes.length > 0)
-			params.set("types", state.selectedTypes.join(","));
+		if (filtersState.selectedTypes.length > 0)
+			params.set("types", filtersState.selectedTypes.join(","));
 
 		const url = `/api/items${params.toString() ? `?${params.toString()}` : ""}`;
 		const response = await fetch(url).catch(() => null);

@@ -136,55 +136,10 @@ function sanitizeSavedView(view) {
 	};
 }
 
-function getCurrentSavedViewFilters() {
-	return sanitizeSavedViewFilters({
-		readStatus: state.readStatus,
-		selectedTypes: state.selectedTypes,
-		selectedTags: state.selectedTags,
-		excludedTags: state.excludedTags,
-		selectedDomains: state.selectedDomains,
-		excludedDomains: state.excludedDomains,
-		selectedAuthors: state.selectedAuthors,
-		excludedAuthors: state.excludedAuthors,
-		searchTokens: state.searchTokens,
-		searchQuery: state.searchQuery,
-	});
-}
-
-function sortValues(values) {
-	return [...values].sort((left, right) =>
-		String(left).localeCompare(String(right), undefined, {
-			sensitivity: "base",
-		}),
-	);
-}
-
 function getSearchTokenSignature(token) {
 	if (!token) return "";
 	if (token.kind === "text") return `text:${token.value.toLowerCase()}`;
 	return `field:${token.field}:${token.operator}:${token.value.toLowerCase()}`;
-}
-
-function buildSavedViewSignature(filters) {
-	const snapshot = sanitizeSavedViewFilters(filters);
-	return JSON.stringify({
-		readStatus: snapshot.readStatus,
-		selectedTypes: sortValues(snapshot.selectedTypes),
-		selectedTags: sortValues(snapshot.selectedTags),
-		excludedTags: sortValues(snapshot.excludedTags),
-		selectedDomains: sortValues(snapshot.selectedDomains),
-		excludedDomains: sortValues(snapshot.excludedDomains),
-		selectedAuthors: sortValues(
-			snapshot.selectedAuthors.map((value) => value.toLowerCase()),
-		),
-		excludedAuthors: sortValues(
-			snapshot.excludedAuthors.map((value) => value.toLowerCase()),
-		),
-		searchTokens: sortValues(
-			snapshot.searchTokens.map(getSearchTokenSignature),
-		),
-		searchQuery: snapshot.searchQuery.toLowerCase(),
-	});
 }
 
 function loadLegacySavedViewsFromStorage() {
@@ -228,8 +183,125 @@ function getAllViews() {
 	return [...BUILT_IN_VIEWS, ...state.savedViews];
 }
 
-function getViewsForMatching() {
-	return [...state.savedViews, ...BUILT_IN_VIEWS];
+function getCurrentManualFilters() {
+	return sanitizeSavedViewFilters({
+		readStatus: state.readStatus,
+		selectedTypes: state.selectedTypes,
+		selectedTags: state.selectedTags,
+		excludedTags: state.excludedTags,
+		selectedDomains: state.selectedDomains,
+		excludedDomains: state.excludedDomains,
+		selectedAuthors: state.selectedAuthors,
+		excludedAuthors: state.excludedAuthors,
+		searchTokens: state.searchTokens,
+		searchQuery: state.searchQuery,
+	});
+}
+
+function mergeStringArrays(primary, secondary) {
+	return sanitizeStringArray([...(primary || []), ...(secondary || [])], {
+		lowercase: false,
+	});
+}
+
+function mergeSearchTokens(primary, secondary) {
+	const merged = [...(primary || []), ...(secondary || [])]
+		.map(sanitizeSearchToken)
+		.filter(Boolean);
+	const seen = new Set();
+	return merged.filter((token) => {
+		const signature = getSearchTokenSignature(token);
+		if (seen.has(signature)) return false;
+		seen.add(signature);
+		return true;
+	});
+}
+
+export function getCurrentFilters(baseFilters = getCurrentManualFilters()) {
+	const activeViews = getAllViews().filter((view) =>
+		state.activeSavedViewIds.includes(view.id),
+	);
+
+	return activeViews.reduce((merged, view) => {
+		const overlay = sanitizeSavedViewFilters(view.filters);
+		return {
+			readStatus:
+				overlay.readStatus !== "all" ? overlay.readStatus : merged.readStatus,
+			selectedTypes: mergeStringArrays(merged.selectedTypes, overlay.selectedTypes),
+			selectedTags: mergeStringArrays(merged.selectedTags, overlay.selectedTags),
+			excludedTags: sanitizeStringArray(
+				[...merged.excludedTags, ...overlay.excludedTags].filter(
+					(value) =>
+						!mergeStringArrays(
+							merged.selectedTags,
+							overlay.selectedTags,
+						).includes(value),
+				),
+				{ lowercase: true },
+			),
+			selectedDomains: mergeStringArrays(
+				merged.selectedDomains,
+				overlay.selectedDomains,
+			),
+			excludedDomains: sanitizeStringArray(
+				[...merged.excludedDomains, ...overlay.excludedDomains].filter(
+					(value) =>
+						!mergeStringArrays(
+							merged.selectedDomains,
+							overlay.selectedDomains,
+						).includes(value),
+				),
+				{ lowercase: true },
+			),
+			selectedAuthors: mergeStringArrays(
+				merged.selectedAuthors,
+				overlay.selectedAuthors,
+			),
+			excludedAuthors: sanitizeStringArray(
+				[...merged.excludedAuthors, ...overlay.excludedAuthors].filter(
+					(value) =>
+						!mergeStringArrays(
+							merged.selectedAuthors,
+							overlay.selectedAuthors,
+						)
+							.map((entry) => entry.toLowerCase())
+							.includes(value.toLowerCase()),
+				),
+			),
+			searchTokens: mergeSearchTokens(merged.searchTokens, overlay.searchTokens),
+			searchQuery: overlay.searchQuery || merged.searchQuery,
+		};
+	}, baseFilters);
+}
+
+function setActiveSavedViewIds(nextIds) {
+	state.activeSavedViewIds = nextIds.filter((id, index, allIds) => {
+		return Boolean(id) && allIds.indexOf(id) === index;
+	});
+}
+
+function toggleSavedViewId(viewId) {
+	const view = getAllViews().find((entry) => entry.id === viewId);
+	if (!view) return;
+
+	const isActive = state.activeSavedViewIds.includes(viewId);
+	if (isActive) {
+		setActiveSavedViewIds(state.activeSavedViewIds.filter((id) => id !== viewId));
+		return;
+	}
+
+	const filters = sanitizeSavedViewFilters(view.filters);
+	let nextIds = [...state.activeSavedViewIds];
+
+	if (filters.readStatus !== "all") {
+		nextIds = nextIds.filter((id) => {
+			const activeView = getAllViews().find((entry) => entry.id === id);
+			if (!activeView) return false;
+			return sanitizeSavedViewFilters(activeView.filters).readStatus === "all";
+		});
+	}
+
+	setActiveSavedViewIds([...nextIds, viewId]);
 }
 
 export function createSavedViews({ closeAllDropdowns, refreshList }) {
@@ -294,18 +366,28 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 
 	function updateViewsFilterDisplay() {
 		if (!dom.viewsFilterValue) return;
-		const activeView = getAllViews().find(
-			(view) => view.id === state.activeSavedViewId,
+		const activeViews = getAllViews().filter((view) =>
+			state.activeSavedViewIds.includes(view.id),
 		);
-		dom.viewsFilterValue.textContent = activeView?.name || "None";
+		if (activeViews.length === 0) {
+			dom.viewsFilterValue.textContent = "None";
+			return;
+		}
+		if (activeViews.length === 1) {
+			dom.viewsFilterValue.textContent = activeViews[0]?.name || "None";
+			return;
+		}
+		dom.viewsFilterValue.textContent = `${activeViews.length} selected`;
 	}
 
 	function openSaveViewModal() {
 		if (!dom.saveViewModal) return;
 
 		const activeName =
-			state.savedViews.find((view) => view.id === state.activeSavedViewId)
-				?.name || "";
+			state.activeSavedViewIds.length === 1
+				? state.savedViews.find((view) => view.id === state.activeSavedViewIds[0])
+						?.name || ""
+				: "";
 		dom.saveViewModal.style.display = "flex";
 		if (dom.saveViewName) {
 			dom.saveViewName.value = activeName;
@@ -323,6 +405,9 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 	async function removeSavedView(viewId) {
 		const previousViews = [...state.savedViews];
 		state.savedViews = state.savedViews.filter((view) => view.id !== viewId);
+		setActiveSavedViewIds(
+			state.activeSavedViewIds.filter((activeId) => activeId !== viewId),
+		);
 		const persisted = await persistSavedViews();
 		if (!persisted) {
 			state.savedViews = previousViews;
@@ -356,7 +441,7 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 
 			const checkbox = document.createElement("input");
 			checkbox.type = "checkbox";
-			checkbox.checked = view.id === state.activeSavedViewId;
+			checkbox.checked = state.activeSavedViewIds.includes(view.id);
 			checkbox.setAttribute("aria-label", `Apply saved view ${view.name}`);
 
 			const text = document.createElement("span");
@@ -383,11 +468,7 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 			row.appendChild(content);
 			row.addEventListener("click", (event) => {
 				event.preventDefault();
-				if (view.id === state.activeSavedViewId) {
-					clearActiveView();
-					return;
-				}
-				applySavedView(view.id);
+				toggleSavedView(view.id);
 				closeAllDropdowns();
 			});
 			return row;
@@ -397,56 +478,16 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 	}
 
 	function syncActiveSavedView() {
-		const currentSignature = buildSavedViewSignature(
-			getCurrentSavedViewFilters(),
+		const availableViewIds = new Set(getAllViews().map((view) => view.id));
+		setActiveSavedViewIds(
+			state.activeSavedViewIds.filter((viewId) => availableViewIds.has(viewId)),
 		);
-		const nextActiveId =
-			getViewsForMatching().find(
-				(view) => buildSavedViewSignature(view.filters) === currentSignature,
-			)?.id || "";
-
-		state.activeSavedViewId = nextActiveId;
 		updateViewsFilterDisplay();
 		renderSavedViewOptions();
 	}
 
-	function clearActiveView() {
-		state.readStatus = "all";
-		state.selectedTypes = [];
-		state.selectedTags = [];
-		state.excludedTags = [];
-		state.selectedDomains = [];
-		state.excludedDomains = [];
-		state.selectedAuthors = [];
-		state.excludedAuthors = [];
-		state.searchTokens = [];
-		state.searchQuery = "";
-
-		if (dom.searchInput) dom.searchInput.value = "";
-
-		closeAllDropdowns();
-		closeSaveViewModal();
-		refreshList({ reloadServer: true });
-	}
-
-	function applySavedView(viewId) {
-		const view = getAllViews().find((entry) => entry.id === viewId);
-		if (!view) return;
-
-		const filters = sanitizeSavedViewFilters(view.filters);
-		state.readStatus = filters.readStatus;
-		state.selectedTypes = filters.selectedTypes;
-		state.selectedTags = filters.selectedTags;
-		state.excludedTags = filters.excludedTags;
-		state.selectedDomains = filters.selectedDomains;
-		state.excludedDomains = filters.excludedDomains;
-		state.selectedAuthors = filters.selectedAuthors;
-		state.excludedAuthors = filters.excludedAuthors;
-		state.searchTokens = filters.searchTokens;
-		state.searchQuery = filters.searchQuery;
-
-		if (dom.searchInput) dom.searchInput.value = filters.searchQuery;
-
+	function toggleSavedView(viewId) {
+		toggleSavedViewId(viewId);
 		closeAllDropdowns();
 		closeSaveViewModal();
 		refreshList({ reloadServer: true });
@@ -459,7 +500,7 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 			return;
 		}
 
-		const filters = getCurrentSavedViewFilters();
+		const filters = getCurrentFilters();
 		const existing = state.savedViews.find(
 			(view) => view.name.toLowerCase() === name.toLowerCase(),
 		);

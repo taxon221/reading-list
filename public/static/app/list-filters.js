@@ -1,6 +1,6 @@
-import { applyListSearch } from "./list-search.js";
+import { getCurrentFilters } from "./list-saved-views.js";
 import { dom, state } from "./shared.js";
-import { getDomain } from "./utils.js";
+import { applySearch, getDomain } from "./utils.js";
 
 const CLIENT_ONLY_FILTER_TYPES = new Set(["domain", "author"]);
 
@@ -108,38 +108,43 @@ export function createListFilters({ refreshList }) {
 	}
 
 	function applyClientFilters(items) {
-		let result = applyListSearch(items);
-		if (state.selectedDomains.length > 0) {
+		const filters = getCurrentFilters();
+		let result = applySearch(
+			items,
+			filters.searchQuery,
+			filters.searchTokens,
+		);
+		if (filters.selectedDomains.length > 0) {
 			result = result.filter((item) =>
-				state.selectedDomains.includes(getDomain(item.url)),
+				filters.selectedDomains.includes(getDomain(item.url)),
 			);
 		}
-		if (state.excludedDomains.length > 0) {
+		if (filters.excludedDomains.length > 0) {
 			result = result.filter(
-				(item) => !state.excludedDomains.includes(getDomain(item.url)),
+				(item) => !filters.excludedDomains.includes(getDomain(item.url)),
 			);
 		}
-		if (state.selectedAuthors.length > 0) {
+		if (filters.selectedAuthors.length > 0) {
 			result = result.filter((item) =>
-				state.selectedAuthors.some(
+				filters.selectedAuthors.some(
 					(author) =>
 						(item.author || "").toLowerCase() === author.toLowerCase(),
 				),
 			);
 		}
-		if (state.excludedAuthors.length > 0) {
+		if (filters.excludedAuthors.length > 0) {
 			result = result.filter(
 				(item) =>
-					!state.excludedAuthors.some(
+					!filters.excludedAuthors.some(
 						(author) =>
 							(item.author || "").toLowerCase() === author.toLowerCase(),
 					),
 			);
 		}
-		if (state.readStatus === "read") {
+		if (filters.readStatus === "read") {
 			result = result.filter((item) => Boolean(item.is_read));
 		}
-		if (state.readStatus === "unread") {
+		if (filters.readStatus === "unread") {
 			result = result.filter((item) => !item.is_read);
 		}
 		return result;
