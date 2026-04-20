@@ -86,6 +86,7 @@ export const dom = {
 	editIdInput: byId("edit-id"),
 	editUrlInput: byId("edit-url"),
 	editTitleInput: byId("edit-title"),
+	editAuthorInput: byId("edit-author"),
 	editTypeSelect: byId("edit-type"),
 	editTagInput: byId("edit-tag-input"),
 	editTagsContainer: byId("edit-tags-input"),

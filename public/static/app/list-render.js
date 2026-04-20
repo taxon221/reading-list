@@ -209,6 +209,17 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 		});
 		meta.appendChild(domain);
 
+		if (
+			item.type === "article" &&
+			Number.isInteger(item.reading_time_minutes) &&
+			item.reading_time_minutes > 0
+		) {
+			const readingTime = document.createElement("span");
+			readingTime.className = "item-author";
+			readingTime.textContent = `${item.reading_time_minutes} min read`;
+			meta.appendChild(readingTime);
+		}
+
 		if (item.author) {
 			const author = document.createElement("button");
 			author.type = "button";

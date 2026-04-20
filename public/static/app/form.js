@@ -436,6 +436,7 @@ async function submitItemForm(app, event) {
 			dom.authorInput?.value.trim() || state.fetchedMeta?.author || "";
 		let type = dom.typeSelect?.value || "article";
 		let previewImage = state.fetchedMeta?.image || "";
+		let readingTimeMinutes = state.fetchedMeta?.reading_time_minutes ?? null;
 
 		if (!title && !state.fetchedMeta) {
 			const meta = await fetchMetadata(url);
@@ -444,6 +445,7 @@ async function submitItemForm(app, event) {
 				author = author || meta.author || "";
 				type = meta.type || type;
 				previewImage = meta.image || "";
+				readingTimeMinutes = meta.reading_time_minutes ?? null;
 			}
 		}
 
@@ -456,6 +458,7 @@ async function submitItemForm(app, event) {
 				author,
 				type,
 				preview_image: previewImage,
+				reading_time_minutes: readingTimeMinutes,
 				tags: state.pendingTags,
 			}),
 		});

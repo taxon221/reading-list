@@ -176,15 +176,26 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 
 	app.post("/api/items", async (c) => {
 		const currentUser = getCurrentUser(c);
-		const { url, title, author, type, tags, preview_image } =
+		const {
+			url,
+			title,
+			author,
+			type,
+			tags,
+			preview_image,
+			reading_time_minutes,
+		} =
 			await c.req.json();
 
 		if (!url) return c.json({ error: "URL is required" }, 400);
 		const previewImage = normalizeStoredPreviewImage(preview_image);
+		const readingTimeMinutes = Number.isInteger(reading_time_minutes)
+			? Number(reading_time_minutes)
+			: null;
 
 		const result = db
 			.query(
-				"INSERT INTO items (user_id, url, title, author, type, preview_image) VALUES (?, ?, ?, ?, ?, ?)",
+				"INSERT INTO items (user_id, url, title, author, type, preview_image, reading_time_minutes) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			)
 			.run(
 				currentUser.id,
@@ -193,6 +204,7 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 				author || "",
 				type || "article",
 				previewImage,
+				readingTimeMinutes,
 			);
 
 		attachTagsToItem(result.lastInsertRowid, currentUser.id, tags);
@@ -287,12 +299,21 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 	app.put("/api/items/:id", async (c) => {
 		const currentUser = getCurrentUser(c);
 		const id = c.req.param("id");
-		const { url, title, author, type, tags, notes, preview_image } =
-			await c.req.json();
+		const {
+			url,
+			title,
+			author,
+			type,
+			tags,
+			notes,
+			preview_image,
+			reading_time_minutes,
+		} = await c.req.json();
 		const existingItem = getOwnedItem(id, currentUser.id) as {
 			url: string;
 			author: string;
 			preview_image: string;
+			reading_time_minutes: number | null;
 		} | null;
 
 		if (!existingItem) return c.json({ error: "Item not found" }, 404);
@@ -306,15 +327,21 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		const nextPreviewImage =
 			normalizeStoredPreviewImage(preview_image) ||
 			(url === existingItem.url ? existingItem.preview_image : "");
+		const nextReadingTimeMinutes = Number.isInteger(reading_time_minutes)
+			? Number(reading_time_minutes)
+			: reading_time_minutes === null
+				? null
+				: existingItem.reading_time_minutes;
 
 		db.query(
-			"UPDATE items SET url = ?, title = ?, author = ?, type = ?, preview_image = ?, notes = ? WHERE id = ? AND user_id = ?",
+			"UPDATE items SET url = ?, title = ?, author = ?, type = ?, preview_image = ?, reading_time_minutes = ?, notes = ? WHERE id = ? AND user_id = ?",
 		).run(
 			url,
 			title || "",
 			nextAuthor,
 			type || "article",
 			nextPreviewImage,
+			nextReadingTimeMinutes,
 			notes || "",
 			id,
 			currentUser.id,

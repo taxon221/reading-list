@@ -11,16 +11,15 @@ import {
 } from "./utils.js";
 
 export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
-	async function fetchPreviewImage(url) {
-		if (!url || !URL.canParse(url)) return "";
+	async function fetchItemMetadata(url) {
+		if (!url || !URL.canParse(url)) return null;
 
 		const response = await fetch(
 			`/api/fetch-meta?url=${encodeURIComponent(url)}`,
 		).catch(() => null);
-		if (!response?.ok) return "";
+		if (!response?.ok) return null;
 
-		const data = await response.json().catch(() => null);
-		return String(data?.image || "").trim();
+		return response.json().catch(() => null);
 	}
 
 	function openItemMenu(button, id, url) {
@@ -92,6 +91,7 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 		if (dom.editIdInput) dom.editIdInput.value = item.id;
 		if (dom.editUrlInput) dom.editUrlInput.value = item.url;
 		if (dom.editTitleInput) dom.editTitleInput.value = item.title || "";
+		if (dom.editAuthorInput) dom.editAuthorInput.value = item.author || "";
 		if (dom.editTypeSelect) dom.editTypeSelect.value = item.type;
 		if (dom.editForm) dom.editForm.dataset.originalUrl = item.url || "";
 
@@ -203,17 +203,26 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 			const payload = {
 				url: dom.editUrlInput?.value.trim() || "",
 				title: dom.editTitleInput?.value.trim() || "",
+				author: dom.editAuthorInput?.value.trim() || "",
 				type: dom.editTypeSelect?.value || "article",
 				preview_image: "",
+				reading_time_minutes: null,
 				tags: state.editTags,
 			};
 			const originalUrl = dom.editForm?.dataset.originalUrl || "";
 			if (payload.url === originalUrl) {
-				payload.preview_image =
-					state.itemsById.get(Number(dom.editIdInput?.value))?.preview_image ||
-					"";
+				const currentItem = state.itemsById.get(Number(dom.editIdInput?.value));
+				payload.preview_image = currentItem?.preview_image || "";
+				payload.reading_time_minutes =
+					currentItem?.reading_time_minutes ?? null;
 			} else {
-				payload.preview_image = await fetchPreviewImage(payload.url);
+				const meta = await fetchItemMetadata(payload.url);
+				payload.preview_image = String(meta?.image || "").trim();
+				payload.reading_time_minutes = Number.isInteger(
+					meta?.reading_time_minutes,
+				)
+					? Number(meta.reading_time_minutes)
+					: null;
 			}
 
 			const response = await fetch(`/api/items/${dom.editIdInput?.value}`, {

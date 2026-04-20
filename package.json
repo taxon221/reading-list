@@ -7,6 +7,7 @@
 		"dev": "bun run --watch src/index.ts",
 		"start": "bun run src/index.ts",
 		"backfill:preview-images": "bun run src/backfill-preview-images.ts",
+		"backfill:reading-times": "bun run src/backfill-reading-times.ts",
 		"lint": "biome lint src public/static/app",
 		"typecheck": "tsc --noEmit --target esnext --module esnext --moduleResolution bundler --skipLibCheck src/access.ts src/index.ts src/db.ts src/auth-isolation.test.ts",
 		"test": "bun test",

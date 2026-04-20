@@ -62,6 +62,7 @@ export function renderIndexOverlays() {
           <input type="hidden" id="edit-id" />
           <div class="form-group"><label for="edit-url">URL</label><input type="url" id="edit-url" required /></div>
           <div class="form-group"><label for="edit-title">Title</label><input type="text" id="edit-title" /></div>
+          <div class="form-group"><label for="edit-author">Author</label><input type="text" id="edit-author" /></div>
           <div class="form-group"><label for="edit-type">Type</label><select id="edit-type"><option value="article">Article</option><option value="video">Video</option><option value="pdf">PDF</option><option value="ebook">Ebook</option><option value="podcast">Podcast</option></select></div>
           <div class="form-group"><label>Tags</label><div class="tags-input" id="edit-tags-input"><input type="text" id="edit-tag-input" placeholder="Add tags (press Enter)" autocomplete="off" /></div></div>
           <div class="modal-actions"><button type="button" class="btn-secondary" id="modal-cancel">Cancel</button><button type="submit" class="btn-primary">Save</button></div>

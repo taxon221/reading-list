@@ -19,6 +19,7 @@ export type ItemRow = {
 	notes: string;
 	created_at: string;
 	is_read: number;
+	reading_time_minutes: number | null;
 	reading_progress: string;
 };
 

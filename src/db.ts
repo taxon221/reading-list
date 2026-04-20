@@ -114,6 +114,7 @@ function createItemsTable() {
       notes TEXT NOT NULL DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       is_read INTEGER DEFAULT 0,
+      reading_time_minutes INTEGER DEFAULT NULL,
       reading_progress TEXT NOT NULL DEFAULT '',
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
@@ -219,6 +220,11 @@ function syncItemsSchema(bootstrapAdminId: number) {
 		"items",
 		"preview_image",
 		"preview_image TEXT NOT NULL DEFAULT ''",
+	);
+	addColumnIfMissing(
+		"items",
+		"reading_time_minutes",
+		"reading_time_minutes INTEGER DEFAULT NULL",
 	);
 	addColumnIfMissing(
 		"items",

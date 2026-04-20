@@ -227,6 +227,7 @@ type RemoteMetadata = {
 	type: string;
 	author: string | null;
 	image: string | null;
+	reading_time_minutes: number | null;
 };
 
 function buildRemoteMetadataFallback(url: string): RemoteMetadata {
@@ -235,7 +236,27 @@ function buildRemoteMetadataFallback(url: string): RemoteMetadata {
 		type: detectType(url),
 		author: null,
 		image: null,
+		reading_time_minutes: null,
 	};
+}
+
+function estimateReadingTimeMinutes(
+	html: string,
+	sourceUrl: string,
+): number | null {
+	const virtualConsole = new VirtualConsole();
+	const dom = new JSDOM(html, { url: sourceUrl, virtualConsole });
+	const { document } = dom.window;
+	const article = new Readability(document).parse();
+	const text =
+		String(article?.textContent || document.body?.textContent || "")
+			.replace(/\s+/g, " ")
+			.trim();
+	if (!text) return null;
+
+	const wordCount = text.split(" ").filter(Boolean).length;
+	if (wordCount <= 0) return null;
+	return Math.max(1, Math.ceil(wordCount / 200));
 }
 
 export async function fetchRemoteMetadata(
@@ -265,6 +286,7 @@ export async function fetchRemoteMetadata(
 		let title: string | null = null;
 		let author: string | null = null;
 		let image: string | null = null;
+		let readingTimeMinutes: number | null = null;
 
 		if (
 			contentType.includes("text/html") ||
@@ -274,6 +296,9 @@ export async function fetchRemoteMetadata(
 			title = parseTitle(html);
 			author = parseAuthor(html);
 			image = parsePreviewImage(html, safeUrl);
+			if (type === "article") {
+				readingTimeMinutes = estimateReadingTimeMinutes(html, safeUrl);
+			}
 		}
 
 		return {
@@ -281,6 +306,7 @@ export async function fetchRemoteMetadata(
 			type,
 			author,
 			image,
+			reading_time_minutes: readingTimeMinutes,
 		};
 	} catch {
 		return buildRemoteMetadataFallback(safeUrl);
