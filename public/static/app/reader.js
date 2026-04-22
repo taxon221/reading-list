@@ -18,7 +18,7 @@ import {
 import { openEpubReader } from "./reader-epub.js";
 import { initReaderHighlights } from "./reader-highlights.js";
 import { initReaderProgress } from "./reader-progress.js";
-import { dom, state } from "./shared.js";
+import { dom, handleAuthFailure, state } from "./shared.js";
 import {
 	getAuthorizedItemUrl,
 	getItemProgressInfo,
@@ -33,6 +33,61 @@ export function initReader(app) {
 	};
 	Object.assign(readerApi, initReaderProgress());
 	Object.assign(readerApi, initReaderHighlights(app, readerApi));
+
+	function getArticleErrorActions(itemId) {
+		const item = state.itemsById.get(Number(itemId));
+		const tags = Array.isArray(item?.tags) ? item.tags : [];
+		const hasFallbackTags =
+			tags.includes("paywall") && tags.includes("open original");
+
+		return [
+			{
+				label: hasFallbackTags ? "Open original" : "Tag + open original",
+				async onClick(button) {
+					button.disabled = true;
+					openReaderOriginal();
+
+					if (hasFallbackTags) {
+						button.textContent = "Opened";
+						return;
+					}
+
+					const item = state.itemsById.get(Number(itemId));
+					if (!item) {
+						button.textContent = "Opened";
+						return;
+					}
+
+					const tags = Array.isArray(item.tags) ? item.tags : [];
+					const nextTags = Array.from(
+						new Set([...tags, "paywall", "open original"]),
+					);
+					if (nextTags.length === tags.length) {
+						button.textContent = "Opened";
+						return;
+					}
+
+					button.textContent = "Saving...";
+
+					const response = await fetch(`/api/items/${itemId}`, {
+						method: "PATCH",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ tags: nextTags }),
+					}).catch(() => null);
+					if (!response || handleAuthFailure(response) || !response.ok) {
+						button.disabled = false;
+						button.textContent = "Tag + open original";
+						return;
+					}
+
+					state.itemsById.set(Number(itemId), { ...item, tags: nextTags });
+					app.loadItems?.();
+					app.loadTags?.();
+					button.textContent = "Opened + tagged";
+				},
+			},
+		];
+	}
 
 	async function openReader(id, itemUrl, title, type) {
 		resetEpubReader();
@@ -117,12 +172,16 @@ export function initReader(app) {
 			return;
 		}
 
-		const data = await fetchParsedArticle(articleUrl, itemUrl);
-		if (!data) return;
-		if (data.error) {
-			showReaderError(itemUrl, data.message || "Failed to load content");
-			return;
-		}
+		const data = await fetchParsedArticle(articleUrl);
+			if (data.error) {
+				showReaderError(
+					itemUrl,
+					data.message || "Failed to load content",
+					getArticleErrorActions(id),
+					{ includeOpenOriginal: false },
+				);
+				return;
+			}
 
 		if (data.type === "html") {
 			const iframe = document.createElement("iframe");

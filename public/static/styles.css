@@ -1655,13 +1655,16 @@
     max-width: 400px;
 }
 
-.reader-error a {
-    color: var(--accent);
-    text-decoration: none;
+.reader-error-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
 }
 
-.reader-error a:hover {
-    text-decoration: underline;
+.reader-error-actions .header-link[disabled] {
+    opacity: 0.7;
+    cursor: default;
 }
 
 /* Responsive sidebar */

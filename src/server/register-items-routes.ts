@@ -260,6 +260,11 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			);
 		}
 
+		if (body.tags !== undefined) {
+			db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
+			attachTagsToItem(id, currentUser.id, body.tags);
+		}
+
 		return c.json({ success: true });
 	});
 

@@ -53,8 +53,16 @@ export function unlockBackgroundScroll() {
 	window.scrollTo(0, state.lockedBodyScrollY);
 }
 
-export function showReaderError(url, message) {
+export function showReaderError(
+	url,
+	message,
+	actions = [],
+	{ includeOpenOriginal = true } = {},
+) {
 	if (!dom.readerContent) return;
+	if (dom.readerProgress) {
+		dom.readerProgress.style.display = "none";
+	}
 	const wrapper = createReaderNode('<div class="reader-error"></div>');
 
 	const icon = createSvgIcon(
@@ -79,21 +87,33 @@ export function showReaderError(url, message) {
 	const messageEl = createReaderNode("<p></p>");
 	messageEl.textContent = message;
 
-	const linkWrap = createReaderNode("<p></p>");
-	const link = createReaderNode("<a></a>");
-	const authorizedUrl = getAuthorizedItemUrl(url);
-	if (URL.canParse(authorizedUrl, window.location.origin)) {
-		const parsedUrl = new URL(authorizedUrl, window.location.origin);
-		if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
-			link.href = parsedUrl.toString();
+	const actionsWrap = createReaderNode('<div class="reader-error-actions"></div>');
+	if (includeOpenOriginal) {
+		const link = createReaderNode('<a class="header-link"></a>');
+		const authorizedUrl = getAuthorizedItemUrl(url);
+		if (URL.canParse(authorizedUrl, window.location.origin)) {
+			const parsedUrl = new URL(authorizedUrl, window.location.origin);
+			if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
+				link.href = parsedUrl.toString();
+			}
 		}
+		link.target = "_blank";
+		link.rel = "noopener";
+		link.textContent = "Open original";
+		actionsWrap.appendChild(link);
 	}
-	link.target = "_blank";
-	link.rel = "noopener";
-	link.textContent = "Open in new tab →";
-	linkWrap.appendChild(link);
 
-	wrapper.append(icon, messageEl, linkWrap);
+	for (const action of actions) {
+		if (!action?.label || typeof action.onClick !== "function") continue;
+		const button = createReaderNode(
+			'<button type="button" class="header-link"></button>',
+		);
+		button.textContent = action.label;
+		button.addEventListener("click", () => action.onClick(button));
+		actionsWrap.appendChild(button);
+	}
+
+	wrapper.append(icon, messageEl, actionsWrap);
 	dom.readerContent.replaceChildren(wrapper);
 }
 
@@ -343,28 +363,38 @@ export function mountPdfReader(fileUrl, itemId, readerApi) {
 	};
 }
 
-export async function fetchParsedArticle(articleUrl, itemUrl) {
+export async function fetchParsedArticle(articleUrl) {
 	const safeArticleUrl = getSafeReaderFetchUrl(
 		articleUrl,
 		new Set(["/api/proxy"]),
 	);
 	if (!safeArticleUrl) {
-		showReaderError(itemUrl, "This article URL is not supported.");
-		return null;
+		return {
+			error: "Failed to fetch content",
+			reason: "unsupported_url",
+			message: "This article URL is not supported.",
+		};
 	}
 
 	const response = await fetch(safeArticleUrl).catch(() => null);
 	if (!response) {
-		showReaderError(
-			itemUrl,
-			"Failed to load content. The site may not allow embedding.",
-		);
-		return null;
+		return {
+			error: "Failed to fetch content",
+			reason: "fetch_failed",
+			message: "Failed to load content. The site may not allow embedding.",
+		};
 	}
 
-	return await withTimeout(
-		response.json(),
-		15000,
-		"Timed out loading article.",
-	);
+	try {
+		return await withTimeout(response.json(), 15000, "Timed out loading article.");
+	} catch (error) {
+		return {
+			error: "Failed to fetch content",
+			reason: "timeout",
+			message:
+				error instanceof Error && error.message
+					? error.message
+					: "Timed out loading article.",
+		};
+	}
 }

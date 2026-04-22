@@ -11,6 +11,34 @@ import {
 import { getOwnedUploadFile, getUploadContentType } from "./item-store";
 import type { AppBindings } from "./types";
 
+function createArticleOpenError(
+	reason: "fetch_failed" | "login_required_or_paywalled" | "timeout",
+) {
+	if (reason === "login_required_or_paywalled") {
+		return {
+			error: "Failed to fetch content",
+			reason,
+			message:
+				"This article appears to require a subscription or sign-in. Open the original page to continue.",
+		};
+	}
+
+	if (reason === "timeout") {
+		return {
+			error: "Failed to fetch content",
+			reason,
+			message: "This article took too long to load. Open the original page to continue.",
+		};
+	}
+
+	return {
+		error: "Failed to fetch content",
+		reason,
+		message:
+			"We couldn't open this article in the reader. Open the original page to continue.",
+	};
+}
+
 export function registerContentRoutes(app: Hono<AppBindings>) {
 	app.get("/api/fetch-meta", async (c) => {
 		const url = c.req.query("url");
@@ -53,7 +81,14 @@ export function registerContentRoutes(app: Hono<AppBindings>) {
 			clearTimeout(timeout);
 
 			if (!response.ok) {
-				return c.json({ error: "Failed to fetch content" }, 502);
+				return c.json(
+					createArticleOpenError(
+						[401, 402, 403, 451].includes(response.status)
+							? "login_required_or_paywalled"
+							: "fetch_failed",
+					),
+					502,
+				);
 			}
 
 			const contentType = response.headers.get("content-type") || "";
@@ -90,8 +125,14 @@ export function registerContentRoutes(app: Hono<AppBindings>) {
 
 			return c.json({ type: "unsupported", contentType, url: safeUrl });
 		} catch (error: unknown) {
-			const message = error instanceof Error ? error.message : "Unknown error";
-			return c.json({ error: "Failed to fetch content", message }, 500);
+			return c.json(
+				createArticleOpenError(
+					error instanceof Error && error.name === "AbortError"
+						? "timeout"
+						: "fetch_failed",
+				),
+				500,
+			);
 		}
 	});
 

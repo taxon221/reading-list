@@ -341,31 +341,46 @@ export function serializeDocumentHtml(html: string, sourceUrl: string) {
 	return `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
 }
 
-export function extractArticleContent(html: string, sourceUrl: string) {
+function buildArticleContentFallback(html: string, sourceUrl: string) {
 	const virtualConsole = new VirtualConsole();
 	const dom = new JSDOM(html, { url: sourceUrl, virtualConsole });
 	const { document } = dom.window;
-	const baseUrl = new URL(sourceUrl);
 
-	absolutizeDocumentUrls(document, baseUrl);
+	try {
+		absolutizeDocumentUrls(document, new URL(sourceUrl));
+	} catch {}
 
-	const article = new Readability(document).parse();
-	if (article?.content) {
-		return {
-			title: article.title || parseTitle(html) || fallbackTitle(sourceUrl),
-			byline: article.byline || parseAuthor(html) || "",
-			excerpt: article.excerpt || "",
-			content: article.content,
-		};
-	}
-
-	const bodyContent = document.body?.innerHTML?.trim();
 	return {
 		title: parseTitle(html) || fallbackTitle(sourceUrl),
 		byline: parseAuthor(html) || "",
 		excerpt: "",
-		content: bodyContent || "",
+		content: document.body?.innerHTML?.trim() || "",
 	};
+}
+
+export function extractArticleContent(html: string, sourceUrl: string) {
+	try {
+		const virtualConsole = new VirtualConsole();
+		const dom = new JSDOM(html, { url: sourceUrl, virtualConsole });
+		const { document } = dom.window;
+		const baseUrl = new URL(sourceUrl);
+
+		absolutizeDocumentUrls(document, baseUrl);
+
+		const article = new Readability(document).parse();
+		if (article?.content) {
+			return {
+				title: article.title || parseTitle(html) || fallbackTitle(sourceUrl),
+				byline: article.byline || parseAuthor(html) || "",
+				excerpt: article.excerpt || "",
+				content: article.content,
+			};
+		}
+
+		return buildArticleContentFallback(html, sourceUrl);
+	} catch {
+		return buildArticleContentFallback(html, sourceUrl);
+	}
 }
 
 function isPrivateIpAddress(address: string): boolean {
