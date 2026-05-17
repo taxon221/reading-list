@@ -39,6 +39,7 @@ export const state = {
 	currentEpubBook: null,
 	currentEpubRendition: null,
 	pendingUploadFile: null,
+	addMode: "link",
 	itemsById: new Map(),
 	pendingProgressSave: null,
 	pendingProgressItemId: null,
@@ -55,6 +56,19 @@ export const state = {
 
 export const dom = {
 	form: byId("add-item-form"),
+	addEntry: byId("add-entry"),
+	addMenuButton: byId("add-menu-button"),
+	addMenu: byId("add-menu"),
+	addModal: byId("add-modal"),
+	addModalTitle: byId("add-modal-title"),
+	addModalClose: byId("add-modal-close"),
+	addModalCancel: byId("add-modal-cancel"),
+	addUrlGroup: byId("add-url-group"),
+	addUrlLabel: byId("add-url-label"),
+	addDetailsGroup: byId("add-details-group"),
+	addTypeGroup: byId("add-type-group"),
+	addFileSummary: byId("add-file-summary"),
+	addFilePicker: byId("add-file-picker"),
 	urlInput: byId("url"),
 	titleInput: byId("title"),
 	authorInput: byId("author"),
@@ -62,13 +76,15 @@ export const dom = {
 	tagInput: byId("tag-input"),
 	tagsContainer: byId("tags-input"),
 	submitBtn: byId("submit-btn"),
+	rssImportAllBtn: byId("rss-import-all-btn"),
+	rssStatus: byId("rss-status"),
+	rssSubscriptionsList: byId("rss-subscriptions-list"),
 	itemsList: byId("items-list"),
 	searchShell: byId("search-shell"),
 	searchTokenList: byId("search-token-list"),
 	searchInput: byId("search-input"),
 	searchSuggestions: byId("search-suggestions"),
 	fileUploadInput: byId("file-upload-input"),
-	addFormSection: document.querySelector(".add-form"),
 	typeDropdown: byId("type-dropdown"),
 	typeFilterBtn: byId("type-filter-btn"),
 	typeFilterValue: byId("type-filter-value"),
@@ -284,6 +300,7 @@ function closeAccountModal() {
 	dom.accountModalOverlay.hidden = true;
 	dom.accountModalOverlay.style.display = "";
 	document.body.classList.remove("account-modal-open");
+	document.body.classList.remove("modal-open");
 }
 
 function openAccountModal() {
@@ -292,6 +309,7 @@ function openAccountModal() {
 	dom.accountModalOverlay.hidden = false;
 	dom.accountModalOverlay.style.display = "flex";
 	document.body.classList.add("account-modal-open");
+	document.body.classList.add("modal-open");
 	dom.accountModalClose?.focus();
 }
 
@@ -553,10 +571,6 @@ export function showUnauthorizedState(
 		};
 	} else if (state.authUi.loginUrl) {
 		action = { href: state.authUi.loginUrl, label: "Open protected app" };
-	}
-
-	if (dom.addFormSection) {
-		dom.addFormSection.style.display = "none";
 	}
 
 	if (dom.importBtn) {

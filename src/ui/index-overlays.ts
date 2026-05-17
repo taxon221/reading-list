@@ -45,6 +45,25 @@ export function renderIndexOverlays() {
       <button type="button" class="dropdown-item" id="dropdown-open-url"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>Open original URL</button>
     </div>
 
+    <div class="modal-overlay" id="add-modal" style="display: none">
+      <div class="modal">
+        <div class="modal-header"><h2 id="add-modal-title">Add link</h2><button type="button" class="modal-close" id="add-modal-close">×</button></div>
+        <form id="add-item-form">
+          <input type="file" id="file-upload-input" accept=".pdf,.epub,application/pdf,application/epub+zip" hidden />
+          <div class="form-group" id="add-url-group"><label for="url" id="add-url-label">URL</label><input type="url" id="url" placeholder="https://example.com/article" autocomplete="off" /></div>
+          <button type="button" class="import-btn file-picker-btn" id="add-file-picker" style="display: none">Choose PDF / EPUB</button>
+          <div id="add-file-summary" class="account-meta" hidden>No file selected.</div>
+          <div id="add-details-group">
+            <div class="form-group"><label for="title">Title</label><input type="text" id="title" placeholder="Title" class="title-input" /></div>
+            <div class="form-group"><label for="author">Author</label><input type="text" id="author" placeholder="Author" class="author-input" /></div>
+            <div class="form-group" id="add-type-group"><label for="type-select">Type</label><select id="type-select"><option value="article">Article</option><option value="video">Video</option><option value="pdf">PDF</option><option value="ebook">Ebook</option><option value="podcast">Podcast</option></select></div>
+            <div class="form-group"><label>Tags</label><div class="tags-input" id="tags-input"><input type="text" id="tag-input" placeholder="Add tags (Enter or Tab)" autocomplete="off" /></div></div>
+          </div>
+          <div class="modal-actions"><button type="button" class="btn-secondary" id="add-modal-cancel">Cancel</button><button type="submit" class="btn-primary" id="submit-btn">Add</button></div>
+        </form>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="save-view-modal" style="display: none">
       <div class="modal">
         <div class="modal-header"><h2>Save View</h2><button type="button" class="modal-close" id="save-view-modal-close">×</button></div>
@@ -75,7 +94,7 @@ export function renderIndexOverlays() {
       <div class="account-modal" id="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-heading">
         <div class="account-modal-header"><h2 id="account-modal-heading" class="account-modal-heading">Account</h2><button type="button" class="modal-close" id="account-modal-close" aria-label="Close account">×</button></div>
         <div class="account-modal-body">
-          <div id="account-panel-user" hidden><p class="account-title" id="account-title"></p><p class="account-email" id="account-email"></p><p class="account-meta" id="account-meta"></p><a class="header-link account-modal-action" id="account-action" href="#" hidden></a><button type="button" class="import-btn account-modal-action" id="import-btn">Import CSV</button></div>
+          <div id="account-panel-user" hidden><p class="account-title" id="account-title"></p><p class="account-email" id="account-email"></p><p class="account-meta" id="account-meta"></p><a class="header-link account-modal-action" id="account-action" href="#" hidden></a><button type="button" class="import-btn account-modal-action" id="import-btn">Import CSV</button><button type="button" class="import-btn account-modal-action" id="rss-import-all-btn">Refresh RSS</button><p class="account-meta" id="rss-status"></p><div class="account-section"><h3>RSS feeds</h3><div id="rss-subscriptions-list" class="rss-subscriptions-list"><p class="account-meta">No RSS feeds loaded yet.</p></div></div></div>
           <div id="account-panel-guest" hidden><p class="account-guest-message" id="account-guest-message"></p><p class="account-meta" id="account-guest-meta"></p><a class="header-link account-modal-action" id="auth-link" href="#" hidden></a></div>
         </div>
       </div>

@@ -117,6 +117,36 @@ header h1 {
     flex: 0 0 auto;
 }
 
+.add-entry {
+    position: relative;
+}
+
+.add-entry .add-menu {
+    position: absolute;
+    left: auto;
+    right: 0;
+    top: calc(100% + 0.4rem);
+    width: 160px;
+    min-width: 160px;
+    max-width: calc(100vw - 1rem);
+    z-index: 1100;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.add-entry.open .add-menu:not([hidden]) {
+    display: block;
+}
+
+.add-entry .add-menu-option {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 0.45rem 0.6rem;
+    text-align: left;
+    white-space: nowrap;
+}
+
 .account-icon-btn {
     display: inline-flex;
     align-items: center;
@@ -250,6 +280,58 @@ header h1 {
 .import-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+}
+
+.account-section {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.account-section h3 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.65rem;
+}
+
+.rss-subscriptions-list {
+    display: grid;
+    gap: 0.6rem;
+}
+
+.rss-subscription-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+}
+
+.rss-subscription-main {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.rss-subscription-main strong,
+.rss-subscription-main a {
+    overflow-wrap: anywhere;
+}
+
+.rss-subscription-main a {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    text-decoration: none;
+}
+
+.file-picker-btn {
+    width: 100%;
+    margin-bottom: 0.75rem;
+    min-height: 40px;
+    font-weight: 600;
 }
 
 .theme-toggle {

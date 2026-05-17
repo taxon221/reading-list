@@ -15,11 +15,6 @@ import {
 	wait,
 } from "./utils.js";
 
-function preventDropDefaults(event) {
-	event.preventDefault();
-	event.stopPropagation();
-}
-
 async function fetchMetadata(url) {
 	if (!url || !isValidUrl(url)) return null;
 
@@ -32,7 +27,10 @@ async function fetchMetadata(url) {
 
 function clearPendingUploadFile() {
 	state.pendingUploadFile = null;
-	if (dom.urlInput) dom.urlInput.placeholder = defaultUrlPlaceholder;
+	if (dom.addFileSummary) {
+		dom.addFileSummary.hidden = true;
+		dom.addFileSummary.textContent = "No file selected.";
+	}
 	if (dom.fileUploadInput) dom.fileUploadInput.value = "";
 }
 
@@ -42,8 +40,74 @@ function resetAddForm(app) {
 	renderTagPills(state.pendingTags, dom.tagsContainer, dom.tagInput);
 	state.fetchedMeta = null;
 	clearPendingUploadFile();
+	closeAddModal();
 	app.loadItems?.();
 	app.loadTags?.();
+}
+
+function closeAddMenu() {
+	if (!dom.addMenuButton || !dom.addMenu || !dom.addEntry) return;
+	dom.addMenuButton.setAttribute("aria-expanded", "false");
+	dom.addEntry.classList.remove("open");
+	dom.addMenu.hidden = true;
+}
+
+function openAddMenu() {
+	if (!dom.addMenuButton || !dom.addMenu || !dom.addEntry) return;
+	dom.addMenuButton.setAttribute("aria-expanded", "true");
+	dom.addEntry.classList.add("open");
+	dom.addMenu.hidden = false;
+}
+
+function configureAddModal(mode) {
+	state.addMode = mode;
+	const isRss = mode === "rss";
+	const isFile = mode === "file";
+	if (dom.addModalTitle) {
+		dom.addModalTitle.textContent = isRss
+			? "Add RSS feed"
+			: isFile
+				? "Add PDF / EPUB"
+				: "Add link";
+	}
+	if (dom.addUrlLabel) dom.addUrlLabel.textContent = isRss ? "RSS feed URL" : "URL";
+	if (dom.urlInput) {
+		dom.urlInput.required = !isFile;
+		dom.urlInput.placeholder = isRss
+			? "https://example.com/feed.xml"
+			: defaultUrlPlaceholder;
+		dom.urlInput.value = "";
+	}
+	if (dom.addUrlGroup) dom.addUrlGroup.hidden = isFile;
+	if (dom.addDetailsGroup) dom.addDetailsGroup.hidden = isRss;
+	if (dom.addTypeGroup) dom.addTypeGroup.hidden = isFile || isRss;
+	if (dom.addFilePicker) dom.addFilePicker.style.display = isFile ? "inline-flex" : "none";
+	if (dom.addFileSummary) dom.addFileSummary.hidden = !isFile || !state.pendingUploadFile;
+	if (dom.submitBtn) dom.submitBtn.textContent = isRss ? "Add RSS feed" : "Add";
+	if (dom.typeSelect && mode === "link") dom.typeSelect.value = "article";
+}
+
+function closeAddModal() {
+	if (!dom.addModal) return;
+	dom.addModal.style.display = "none";
+	document.body.classList.remove("modal-open");
+}
+
+function openAddModal(mode) {
+	closeAddMenu();
+	dom.form?.reset();
+	state.pendingTags.length = 0;
+	renderTagPills(state.pendingTags, dom.tagsContainer, dom.tagInput);
+	state.fetchedMeta = null;
+	clearPendingUploadFile();
+	configureAddModal(mode);
+	if (dom.addModal) dom.addModal.style.display = "flex";
+	document.body.classList.add("modal-open");
+	if (mode === "file") {
+		dom.addFilePicker?.focus();
+	} else {
+		dom.urlInput?.focus();
+	}
 }
 
 function stageSelectedFiles(fileList) {
@@ -59,10 +123,9 @@ function stageSelectedFiles(fileList) {
 
 	const file = files[0];
 	state.pendingUploadFile = file;
-
-	if (dom.urlInput) {
-		dom.urlInput.value = "";
-		dom.urlInput.placeholder = `Selected file: ${file.name}`;
+	if (dom.addFileSummary) {
+		dom.addFileSummary.hidden = false;
+		dom.addFileSummary.textContent = `Selected file: ${file.name}`;
 	}
 
 	const parsed = parseTitleAuthorFromFilename(file.name);
@@ -347,27 +410,6 @@ function initFileInputs() {
 		const files = dom.fileUploadInput?.files;
 		if (files?.length) stageSelectedFiles(files);
 	});
-
-	if (!dom.addFormSection) return;
-
-	["dragenter", "dragover"].forEach((eventName) => {
-		dom.addFormSection.addEventListener(eventName, (event) => {
-			preventDropDefaults(event);
-			dom.addFormSection.classList.add("drag-over");
-		});
-	});
-
-	["dragleave", "dragend", "drop"].forEach((eventName) => {
-		dom.addFormSection.addEventListener(eventName, (event) => {
-			preventDropDefaults(event);
-			dom.addFormSection.classList.remove("drag-over");
-		});
-	});
-
-	dom.addFormSection.addEventListener("drop", (event) => {
-		const files = event.dataTransfer?.files;
-		if (files?.length) stageSelectedFiles(files);
-	});
 }
 
 function initMetadataLookup() {
@@ -388,6 +430,8 @@ function initMetadataLookup() {
 			}
 			return;
 		}
+
+		if (state.addMode === "rss") return;
 
 		state.fetchTimeout = setTimeout(async () => {
 			state.isFetching = true;
@@ -414,21 +458,27 @@ async function submitItemForm(app, event) {
 
 	const url = dom.urlInput?.value.trim() || "";
 
-	if (!url) {
-		if (state.pendingUploadFile) {
-			await addPendingUploadFile(app);
+	if (state.addMode === "file") {
+		if (!state.pendingUploadFile) {
+			dom.fileUploadInput?.click();
 			return;
 		}
-
-		dom.fileUploadInput?.click();
+		await addPendingUploadFile(app);
 		return;
 	}
+
+	if (!url) return;
 
 	if (!dom.submitBtn) return;
 	dom.submitBtn.disabled = true;
 	dom.submitBtn.textContent = "Adding...";
 
 	try {
+		if (state.addMode === "rss") {
+			await importRssFeedUrl(app, url);
+			return;
+		}
+
 		if (state.isFetching) await wait(500);
 
 		let title = dom.titleInput?.value.trim() || "";
@@ -522,6 +572,172 @@ function handleShareTarget() {
 	}
 }
 
+function setRssStatus(message) {
+	if (dom.rssStatus) dom.rssStatus.textContent = message;
+}
+
+async function importRssFeedUrl(app, feedUrl) {
+	const response = await fetch("/api/rss-subscriptions", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ feed_url: feedUrl }),
+	}).catch(() => null);
+	if (!response) {
+		alert("RSS import failed: no response from server.");
+		return false;
+	}
+	if (handleAuthFailure(response)) return true;
+
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) {
+		alert(data.error || "RSS import failed.");
+		return false;
+	}
+
+	alert(`Following RSS feed. ${data.seen || 0} existing post(s) ignored.`);
+	await loadRssSubscriptions();
+	resetAddForm(app);
+	return true;
+}
+
+async function importAllRssSubscriptions(app) {
+	if (state.isUnauthorized) {
+		showUnauthorizedState(state.authMessage);
+		return;
+	}
+	if (!dom.rssImportAllBtn) return;
+
+	const originalText = dom.rssImportAllBtn.textContent;
+	dom.rssImportAllBtn.disabled = true;
+	dom.rssImportAllBtn.textContent = "Refreshing...";
+	setRssStatus("Refreshing RSS subscriptions...");
+
+	try {
+		const response = await fetch("/api/rss-subscriptions/import", {
+			method: "POST",
+		}).catch(() => null);
+		if (!response) {
+			setRssStatus("RSS refresh failed: no response from server.");
+			return;
+		}
+		if (handleAuthFailure(response)) return;
+		const data = await response.json().catch(() => ({}));
+		if (!response.ok) {
+			setRssStatus(data.error || "RSS refresh failed.");
+			return;
+		}
+
+		const results = Array.isArray(data.results) ? data.results : [];
+		const imported = results.reduce((sum, result) => sum + (result.imported || 0), 0);
+		const failed = results.filter((result) => !result.ok).length;
+		setRssStatus(
+			failed
+				? `Imported ${imported} new item(s); ${failed} feed(s) failed.`
+				: `Imported ${imported} new item(s).`,
+		);
+		app.loadItems?.();
+		app.loadTags?.();
+	} finally {
+		dom.rssImportAllBtn.disabled = false;
+		dom.rssImportAllBtn.textContent = originalText || "Refresh RSS";
+	}
+}
+
+function initRssActions(app) {
+	dom.rssImportAllBtn?.addEventListener("click", async () => {
+		await importAllRssSubscriptions(app);
+		await loadRssSubscriptions();
+	});
+	dom.rssSubscriptionsList?.addEventListener("click", async (event) => {
+		const action = event.target.closest?.("[data-rss-action]");
+		if (!action) return;
+		const id = action.dataset.rssId;
+		if (!id) return;
+		if (action.dataset.rssAction === "delete") {
+			const response = await fetch(`/api/rss-subscriptions/${id}`, {
+				method: "DELETE",
+			}).catch(() => null);
+			if (!response) return;
+			if (handleAuthFailure(response)) return;
+			await loadRssSubscriptions();
+		}
+	});
+	dom.accountButton?.addEventListener("click", () => {
+		setTimeout(() => loadRssSubscriptions(), 0);
+	});
+}
+
+function initAddMenu() {
+	dom.addMenuButton?.addEventListener("click", (event) => {
+		event.stopPropagation();
+		const isOpen = dom.addMenuButton?.getAttribute("aria-expanded") === "true";
+		if (isOpen) {
+			closeAddMenu();
+			return;
+		}
+		openAddMenu();
+	});
+	dom.addMenu?.addEventListener("click", (event) => {
+		const option = event.target.closest?.("[data-add-type]");
+		if (!option) return;
+		openAddModal(option.dataset.addType || "link");
+	});
+	dom.addModalClose?.addEventListener("click", closeAddModal);
+	dom.addModalCancel?.addEventListener("click", closeAddModal);
+	dom.addModal?.addEventListener("click", (event) => {
+		if (event.target === dom.addModal) closeAddModal();
+	});
+	dom.addFilePicker?.addEventListener("click", () => dom.fileUploadInput?.click());
+	document.addEventListener("click", (event) => {
+		if (dom.addEntry?.contains(event.target)) return;
+		closeAddMenu();
+	});
+}
+
+function renderRssSubscriptions(subscriptions) {
+	if (!dom.rssSubscriptionsList) return;
+	dom.rssSubscriptionsList.replaceChildren();
+	if (!subscriptions.length) {
+		const empty = document.createElement("p");
+		empty.className = "account-meta";
+		empty.textContent = "No RSS feeds yet.";
+		dom.rssSubscriptionsList.appendChild(empty);
+		return;
+	}
+	for (const subscription of subscriptions) {
+		const row = document.createElement("div");
+		row.className = "rss-subscription-row";
+		const main = document.createElement("div");
+		main.className = "rss-subscription-main";
+		const title = document.createElement("strong");
+		title.textContent = subscription.title || subscription.feed_url;
+		const url = document.createElement("a");
+		url.href = subscription.feed_url;
+		url.target = "_blank";
+		url.rel = "noopener";
+		url.textContent = subscription.feed_url;
+		main.append(title, url);
+		const remove = document.createElement("button");
+		remove.type = "button";
+		remove.className = "dropdown-clear";
+		remove.dataset.rssAction = "delete";
+		remove.dataset.rssId = String(subscription.id);
+		remove.textContent = "Remove";
+		row.append(main, remove);
+		dom.rssSubscriptionsList.appendChild(row);
+	}
+}
+
+async function loadRssSubscriptions() {
+	if (!dom.rssSubscriptionsList || state.isUnauthorized) return;
+	const response = await fetch("/api/rss-subscriptions").catch(() => null);
+	if (!response) return;
+	if (handleAuthFailure(response)) return;
+	if (!response.ok) return;
+	const subscriptions = await response.json().catch(() => []);
+	renderRssSubscriptions(Array.isArray(subscriptions) ? subscriptions : []);
+}
+
 export function initForm(app) {
 	setupTagInput(dom.tagInput, state.pendingTags, dom.tagsContainer, {
 		preferSuggestionOnTab: true,
@@ -529,6 +745,8 @@ export function initForm(app) {
 	renderTagPills(state.pendingTags, dom.tagsContainer, dom.tagInput);
 
 	initImport(app);
+	initAddMenu();
+	initRssActions(app);
 	initFileInputs();
 	initMetadataLookup();
 	dom.form?.addEventListener("submit", (event) => submitItemForm(app, event));

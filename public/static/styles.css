@@ -2,6 +2,10 @@
 @import "./styles/search.css";
 @import "./styles/filters.css";
 
+body.modal-open {
+    overflow: hidden;
+}
+
 /* Form */
 .add-form {
     background: var(--bg-card);

@@ -4,6 +4,14 @@ export function renderIndexMain() {
       <header>
         <h1>Reading List</h1>
         <div class="header-actions">
+          <div class="add-entry" id="add-entry">
+            <button type="button" class="import-btn add-menu-button" id="add-menu-button" aria-expanded="false" aria-haspopup="menu">Add ▾</button>
+            <div class="dropdown-menu add-menu" id="add-menu" hidden>
+              <button type="button" class="dropdown-option add-menu-option" data-add-type="link">Add link</button>
+              <button type="button" class="dropdown-option add-menu-option" data-add-type="file">Add PDF / EPUB</button>
+              <button type="button" class="dropdown-option add-menu-option" data-add-type="rss">Add RSS feed</button>
+            </div>
+          </div>
           <div class="account-entry" id="account-entry">
             <button type="button" class="account-icon-btn" id="account-button" aria-expanded="false" aria-haspopup="dialog" aria-controls="account-modal" title="Account" aria-label="Account">
               <svg class="account-icon-guest" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -15,22 +23,6 @@ export function renderIndexMain() {
           <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Theme" title="Theme: Device"><span class="theme-symbol theme-symbol-system" aria-hidden="true">◐</span><span class="theme-symbol theme-symbol-dark" aria-hidden="true">☾</span><span class="theme-symbol theme-symbol-light" aria-hidden="true">☼</span></button>
         </div>
       </header>
-
-      <section class="add-form">
-        <form id="add-item-form">
-          <div class="form-row">
-            <input type="url" id="url" placeholder="Paste a URL..." autocomplete="off" />
-            <input type="file" id="file-upload-input" accept=".pdf,.epub,application/pdf,application/epub+zip" hidden />
-            <button type="submit" id="submit-btn">Add</button>
-          </div>
-          <div class="form-row form-details">
-            <input type="text" id="title" placeholder="Title" class="title-input" />
-            <input type="text" id="author" placeholder="Author" class="author-input" />
-            <select id="type-select"><option value="article">Article</option><option value="video">Video</option><option value="pdf">PDF</option><option value="ebook">Ebook</option><option value="podcast">Podcast</option></select>
-          </div>
-          <div class="form-row"><div class="tags-input" id="tags-input"><input type="text" id="tag-input" placeholder="Add tags (Enter or Tab)" autocomplete="off" /></div></div>
-        </form>
-      </section>
 
       <nav class="view-tabs">
         <button type="button" class="view-tab active" data-view="reading-list">Reading List</button>
