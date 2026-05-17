@@ -69,6 +69,22 @@ bun run dev
 
 All data is stored in `data/reading-list.db`. The `data` directory is created automatically on first run. Back up this file to preserve your reading list.
 
+## RSS subscriptions
+
+Paste a feed URL into Add → Add RSS feed, for example:
+
+```text
+https://example.com/feed.xml
+```
+
+Adding a RSS feed follows it from that point onward. Existing posts already in the feed are marked as seen and are not added to the reading list. Future RSS items are imported as articles with only these default tags: `newsletter` and `rss`.
+
+To manually refresh saved RSS subscriptions, use Refresh RSS in the account menu. To refresh from a scheduler/cron job, run:
+
+```bash
+bun run rss:import
+```
+
 ### API Example
 
 ```bash

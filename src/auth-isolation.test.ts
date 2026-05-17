@@ -65,6 +65,8 @@ function dropAllTables() {
 	db.exec("PRAGMA foreign_keys = OFF");
 
 	for (const table of [
+		"rss_subscription_seen",
+		"rss_subscriptions",
 		"item_tags",
 		"highlights",
 		"user_preferences",
@@ -390,6 +392,96 @@ describe("auth and user isolation", () => {
 		);
 		expect(secondUserItems).toHaveLength(1);
 		expect(secondUserItems[0]?.is_read).toBe(0);
+	});
+
+	test("follows a RSS feed without importing existing posts and only imports future posts", async () => {
+		let includeFuturePost = false;
+		const feedServer = createServer((req, res) => {
+			if (req.url !== "/rss/") {
+				res.writeHead(404).end();
+				return;
+			}
+
+			res.writeHead(200, { "content-type": "application/rss+xml" }).end(`<?xml version="1.0"?>
+				<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+					<channel>
+						<title>Test newsletter</title>
+						<link>https://example.com/</link>
+						<item>
+							<title>Existing newsletter post</title>
+							<link>https://example.com/existing-post/</link>
+							<guid>post-existing</guid>
+							<dc:creator>Newsletter Author</dc:creator>
+						</item>
+						${includeFuturePost ? `<item>
+							<title>Future newsletter post</title>
+							<link>https://example.com/future-post/</link>
+							<guid>post-future</guid>
+							<dc:creator>Newsletter Author</dc:creator>
+						</item>` : ""}
+					</channel>
+				</rss>`);
+		});
+
+		await new Promise<void>((resolve) => {
+			feedServer.listen(0, "127.0.0.1", resolve);
+		});
+
+		try {
+			const address = feedServer.address();
+			if (!address || typeof address === "string") {
+				throw new Error("Failed to start feed server.");
+			}
+
+			const feedUrl = `http://127.0.0.1:${address.port}/rss/`;
+			const created = await apiJson<{ id: number; seen: number }>(
+				"/api/rss-subscriptions",
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ feed_url: feedUrl }),
+				},
+				bootstrapAdminEmail,
+			);
+
+			expect(created.seen).toBe(1);
+			expect(
+				await apiJson<ItemResponse[]>("/api/items", {}, bootstrapAdminEmail),
+			).toEqual([]);
+
+			includeFuturePost = true;
+			const duplicate = await apiJson<{ id: number; seen: number }>(
+				"/api/rss-subscriptions",
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ feed_url: feedUrl }),
+				},
+				bootstrapAdminEmail,
+			);
+			expect(duplicate.id).toBe(created.id);
+			expect(duplicate.seen).toBe(0);
+
+			const rerun = await apiJson<{ imported: number; skipped: number }>(
+				`/api/rss-subscriptions/${created.id}/import`,
+				{ method: "POST" },
+				bootstrapAdminEmail,
+			);
+			expect(rerun.imported).toBe(1);
+			expect(rerun.skipped).toBe(1);
+
+			const items = await apiJson<ItemResponse[]>(
+				"/api/items",
+				{},
+				bootstrapAdminEmail,
+			);
+			expect(items.map((item) => item.title)).toEqual([
+				"Future newsletter post",
+			]);
+			expect(items[0]?.tags.sort()).toEqual(["newsletter", "rss"]);
+		} finally {
+			feedServer.close();
+		}
 	});
 
 	test("serves uploaded files only to the owning user", async () => {

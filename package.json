@@ -6,10 +6,11 @@
 	"scripts": {
 		"dev": "bun run --watch src/index.ts",
 		"start": "bun run src/index.ts",
+		"rss:import": "bun run src/import-rss.ts",
 		"backfill:preview-images": "bun run src/backfill-preview-images.ts",
 		"backfill:reading-times": "bun run src/backfill-reading-times.ts",
 		"lint": "biome lint src public/static/app",
-		"typecheck": "tsc --noEmit --target esnext --module esnext --moduleResolution bundler --skipLibCheck src/access.ts src/index.ts src/db.ts src/auth-isolation.test.ts",
+		"typecheck": "tsc --noEmit --target esnext --module esnext --moduleResolution bundler --skipLibCheck src/access.ts src/index.ts src/db.ts src/auth-isolation.test.ts src/import-rss.ts src/server/register-rss-routes.ts src/server/rss-import.ts",
 		"test": "bun test",
 		"check": "bun run lint && bun run typecheck && bun run test"
 	},

@@ -160,6 +160,34 @@ function createHighlightsTable() {
   `);
 }
 
+function createRssSubscriptionsTable() {
+	db.run(`
+    CREATE TABLE IF NOT EXISTS rss_subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      feed_url TEXT NOT NULL,
+      site_url TEXT NOT NULL DEFAULT '',
+      last_checked_at DATETIME DEFAULT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (user_id, feed_url),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+function createRssSubscriptionSeenTable() {
+	db.run(`
+    CREATE TABLE IF NOT EXISTS rss_subscription_seen (
+      subscription_id INTEGER NOT NULL,
+      external_id TEXT NOT NULL,
+      published_at TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (subscription_id, external_id),
+      FOREIGN KEY (subscription_id) REFERENCES rss_subscriptions(id) ON DELETE CASCADE
+    )
+  `);
+}
+
 function migrateTagsTable(bootstrapAdminId: number) {
 	const columns = getTableColumns("tags");
 	const sql = getTableSql("tags");
@@ -209,6 +237,12 @@ function createIndexes() {
 	db.run("CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id)");
 	db.run(
 		"CREATE INDEX IF NOT EXISTS idx_highlights_user_id ON highlights(user_id)",
+	);
+	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_rss_subscriptions_user_id ON rss_subscriptions(user_id)",
+	);
+	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_rss_subscription_seen_subscription_id ON rss_subscription_seen(subscription_id)",
 	);
 }
 
@@ -285,6 +319,8 @@ export function initDb() {
 			syncTagsSchema(bootstrapAdminId);
 			createItemTagsTable();
 			syncHighlightsSchema(bootstrapAdminId);
+			createRssSubscriptionsTable();
+			createRssSubscriptionSeenTable();
 			createIndexes();
 		})();
 	} finally {

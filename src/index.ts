@@ -11,6 +11,7 @@ import {
 import { registerContentRoutes } from "./server/register-content-routes";
 import { registerImportRoutes } from "./server/register-import-routes";
 import { registerItemRoutes } from "./server/register-items-routes";
+import { registerRssRoutes } from "./server/register-rss-routes";
 import type { AppBindings } from "./server/types";
 import { renderIndexPage } from "./ui/index-page";
 
@@ -71,6 +72,7 @@ app.use("/api/*", async (c, next) => {
 registerContentRoutes(app);
 registerImportRoutes(app);
 registerItemRoutes(app);
+registerRssRoutes(app);
 
 const port = Bun.env.PORT || 3000;
 console.log(`Reading List running at http://localhost:${port}`);
