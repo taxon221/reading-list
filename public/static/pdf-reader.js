@@ -2,12 +2,25 @@ const statusEl = document.getElementById("status");
 const containerEl = document.getElementById("pdf-container");
 const params = new URLSearchParams(window.location.search);
 const fileUrl = params.get("file");
+const initialTheme = params.get("theme") === "dark" ? "dark" : "light";
 const initialProgressRaw = Number(params.get("progress"));
 const initialProgress =
   Number.isFinite(initialProgressRaw) && initialProgressRaw >= 0
     ? Math.min(1, initialProgressRaw)
     : null;
 let progressTicking = false;
+
+applyPdfTheme(initialTheme);
+
+window.addEventListener("message", (event) => {
+  if (event.origin !== window.location.origin) return;
+  if (event.data?.type !== "readinglist:theme") return;
+  applyPdfTheme(event.data.theme === "dark" ? "dark" : "light");
+});
+
+function applyPdfTheme(theme) {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+}
 
 if (!fileUrl) {
   statusEl.textContent = "Missing file URL.";

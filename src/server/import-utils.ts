@@ -110,3 +110,9 @@ export function normalizeReadwiseDate(raw: string): string | null {
 
 	return date.toISOString().replace("T", " ").replace("Z", "");
 }
+
+export function extractUrlFromText(text: string): string {
+	if (!text) return "";
+	const match = text.match(/https?:\/\/[^\s]+/i);
+	return match ? match[0] : "";
+}

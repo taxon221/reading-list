@@ -2,41 +2,69 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+        />
         <title>PDF Reader</title>
         <style>
             :root {
                 color-scheme: light;
+                --pdf-bg: #f5f6f8;
+                --pdf-status-bg: #ffffff;
+                --pdf-status-border: #e5e7eb;
+                --pdf-text: #111827;
+                --pdf-page-bg: #ffffff;
+                --pdf-page-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+            }
+
+            :root.dark {
+                color-scheme: dark;
+                --pdf-bg: #111111;
+                --pdf-status-bg: #1a1a1a;
+                --pdf-status-border: #2d2d2d;
+                --pdf-text: #f3f4f6;
+                --pdf-page-bg: #ffffff;
+                --pdf-page-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
             }
 
             body {
                 margin: 0;
-                font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI,
-                    Roboto, Helvetica, Arial, sans-serif;
-                background: #f5f6f8;
-                color: #111827;
+                font-family:
+                    ui-sans-serif,
+                    system-ui,
+                    -apple-system,
+                    Segoe UI,
+                    Roboto,
+                    Helvetica,
+                    Arial,
+                    sans-serif;
+                background: var(--pdf-bg);
+                color: var(--pdf-text);
             }
 
             #status {
                 position: sticky;
                 top: 0;
                 z-index: 3;
-                padding: 0.5rem 0.75rem;
+                padding: max(0.5rem, env(safe-area-inset-top)) 0.75rem 0.5rem;
                 font-size: 0.8125rem;
-                background: #ffffff;
-                border-bottom: 1px solid #e5e7eb;
+                background: var(--pdf-status-bg);
+                border-bottom: 1px solid var(--pdf-status-border);
             }
 
             #pdf-container {
-                padding: 0.75rem;
+                padding: 0.75rem max(0.75rem, env(safe-area-inset-right))
+                    max(0.75rem, env(safe-area-inset-bottom))
+                    max(0.75rem, env(safe-area-inset-left));
             }
 
             .pdf-page {
                 position: relative;
                 width: fit-content;
                 margin: 0 auto 0.9rem;
-                background: #fff;
-                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+                background: var(--pdf-page-bg);
+                box-shadow: var(--pdf-page-shadow);
             }
 
             .pdf-canvas {

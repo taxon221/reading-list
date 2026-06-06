@@ -12,6 +12,7 @@ import { registerContentRoutes } from "./server/register-content-routes";
 import { registerImportRoutes } from "./server/register-import-routes";
 import { registerItemRoutes } from "./server/register-items-routes";
 import { registerRssRoutes } from "./server/register-rss-routes";
+import { registerShareRoutes } from "./server/register-share-routes";
 import type { AppBindings } from "./server/types";
 import { renderIndexPage } from "./ui/index-page";
 
@@ -27,6 +28,7 @@ app.use("/*", async (c, next) => {
 	const path = c.req.path;
 	if (
 		path === "/" ||
+		path === "/share-target" ||
 		path === "/manifest.webmanifest" ||
 		path === "/pdf-reader.html" ||
 		path.endsWith(".js") ||
@@ -44,6 +46,8 @@ app.get(
 );
 app.get("/pdf-reader.html", serveStatic({ path: "./public/pdf-reader.html" }));
 app.get("/", (c) => c.html(indexPage));
+
+registerShareRoutes(app);
 
 app.get("/api/auth/info", async (c) => c.json(await getAuthUiUrls(c)));
 app.get("/auth/logout", (c) => {

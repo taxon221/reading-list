@@ -10,15 +10,10 @@ import {
 	parseReadwiseTags,
 } from "./import-utils";
 import {
-	allowedUploadExtensions,
 	attachTagsToItem,
-	createStoredFilename,
-	detectUploadedFileType,
-	getUploadFileExtension,
+	importUploadFileForUser,
 	parseTitleAuthorFromFilename,
 	parseUploadTags,
-	removeUploadedFileIfExists,
-	resolveUploadPath,
 } from "./item-store";
 import type { AppBindings } from "./types";
 
@@ -192,64 +187,29 @@ export function registerImportRoutes(app: Hono<AppBindings>) {
 			return c.json({ error: "No files provided" }, 400);
 		}
 
-		const insertItem = db.query(
-			"INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, ?)",
-		);
-
 		let imported = 0;
 		let skipped = 0;
 		const failedFiles: Array<{ name: string; reason: string }> = [];
 
 		for (const file of validFiles) {
-			let storedUrl = "";
-			try {
-				const extension = getUploadFileExtension(file.name);
-				if (!allowedUploadExtensions.has(extension)) {
-					skipped++;
-					failedFiles.push({
-						name: file.name,
-						reason: `Unsupported file type: .${extension || "unknown"}`,
-					});
-					continue;
-				}
-
-				const parsed = parseTitleAuthorFromFilename(file.name);
-				const title =
+			const parsed = parseTitleAuthorFromFilename(file.name);
+			const result = await importUploadFileForUser(currentUser.id, file, {
+				title:
 					validFiles.length === 1 && titleOverride
 						? titleOverride
-						: parsed.title || file.name;
-				const author =
+						: parsed.title || file.name,
+				author:
 					validFiles.length === 1 && authorOverride
 						? authorOverride
-						: parsed.author || "";
-				const storedFilename = createStoredFilename(file.name, extension);
-				storedUrl = `/uploads/${storedFilename}`;
-				const storedPath = resolveUploadPath(storedFilename);
-				if (!storedPath) {
-					throw new Error("Generated upload path is invalid.");
-				}
-				const fileBuffer = new Uint8Array(await file.arrayBuffer());
-				await Bun.write(storedPath, fileBuffer);
+						: parsed.author || "",
+				tags,
+			});
 
-				const type = detectUploadedFileType(extension);
-				const result = insertItem.run(
-					currentUser.id,
-					storedUrl,
-					title,
-					author,
-					type,
-				);
-
-				attachTagsToItem(result.lastInsertRowid, currentUser.id, tags);
+			if (result.ok) {
 				imported++;
-			} catch (error: unknown) {
-				if (storedUrl) removeUploadedFileIfExists(storedUrl);
+			} else if (result.ok === false) {
 				skipped++;
-				failedFiles.push({
-					name: file.name,
-					reason:
-						error instanceof Error ? error.message : "Failed to process file.",
-				});
+				failedFiles.push({ name: result.name, reason: result.reason });
 			}
 		}
 

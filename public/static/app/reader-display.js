@@ -1,4 +1,5 @@
 import { dom, state } from "./shared.js";
+import { getReaderFontSize } from "./reader-font.js";
 import {
 	clampProgressRatio,
 	createSvgIcon,
@@ -196,6 +197,7 @@ function escapeReaderHtml(value) {
 
 export function buildParsedArticleDocument(data) {
 	const isDark = document.documentElement.classList.contains("dark");
+	const fontSize = getReaderFontSize();
 	const title = escapeReaderHtml(data.title || "");
 	const byline = escapeReaderHtml(data.byline || "");
 	const excerpt = escapeReaderHtml(data.excerpt || "");
@@ -214,9 +216,9 @@ export function buildParsedArticleDocument(data) {
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>${title || "Article"}</title>
     <style>
-      :root{color-scheme:${isDark ? "dark" : "light"};--rl-reader-bg:${background};--rl-reader-text:${text};--rl-reader-muted:${muted};--rl-reader-accent:${accent};--rl-reader-rule:${rule};--rl-reader-quote:${quote}}
+      :root{color-scheme:${isDark ? "dark" : "light"};--rl-reader-bg:${background};--rl-reader-text:${text};--rl-reader-muted:${muted};--rl-reader-accent:${accent};--rl-reader-rule:${rule};--rl-reader-quote:${quote};--rl-reader-font-size:${fontSize}px}
       html{scroll-behavior:smooth;background:var(--rl-reader-bg)}
-      body{margin:0 auto;padding:96px 20px 120px;max-width:44rem;background:var(--rl-reader-bg);color:var(--rl-reader-text);font-family:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;font-size:20px;line-height:1.78;letter-spacing:.01em;-webkit-text-size-adjust:100%}
+      body{margin:0 auto;padding:max(96px, calc(64px + env(safe-area-inset-top))) max(20px, env(safe-area-inset-right)) max(120px, calc(80px + env(safe-area-inset-bottom))) max(20px, env(safe-area-inset-left));max-width:44rem;background:var(--rl-reader-bg);color:var(--rl-reader-text);font-family:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;font-size:var(--rl-reader-font-size,20px);line-height:1.78;letter-spacing:.01em;-webkit-text-size-adjust:100%;text-size-adjust:100%}
       .rl-reader-header{margin:0 0 2.6rem;padding-bottom:1.4rem;border-bottom:1px solid var(--rl-reader-rule)}
       .rl-reader-header h1{margin:0 0 .7rem;font-size:clamp(2rem,4vw,3.2rem);line-height:1.03;letter-spacing:-.02em}
       .rl-byline,.rl-excerpt{margin:.35rem 0 0;color:var(--rl-reader-muted)}
@@ -232,6 +234,7 @@ export function buildParsedArticleDocument(data) {
     </style>
     <script>
       window.__readingListSetTheme=function(theme){if(!theme)return;const root=document.documentElement;root.style.colorScheme=theme.isDark?"dark":"light";root.style.setProperty("--rl-reader-bg",theme.background);root.style.setProperty("--rl-reader-text",theme.text);root.style.setProperty("--rl-reader-muted",theme.muted);root.style.setProperty("--rl-reader-accent",theme.accent);root.style.setProperty("--rl-reader-rule",theme.rule);root.style.setProperty("--rl-reader-quote",theme.quote)}
+      window.__readingListSetFontSize=function(size){if(!size)return;document.documentElement.style.setProperty("--rl-reader-font-size",size+"px")}
     </script>
   </head>
   <body>
@@ -327,16 +330,38 @@ export function syncOpenArticleTheme() {
 
 	if (typeof iframe.contentWindow?.__readingListSetTheme === "function") {
 		iframe.contentWindow.__readingListSetTheme(theme);
-		return;
+	} else {
+		doc.documentElement.style.colorScheme = theme.isDark ? "dark" : "light";
+		doc.documentElement.style.setProperty("--rl-reader-bg", theme.background);
+		doc.documentElement.style.setProperty("--rl-reader-text", theme.text);
+		doc.documentElement.style.setProperty("--rl-reader-muted", theme.muted);
+		doc.documentElement.style.setProperty("--rl-reader-accent", theme.accent);
+		doc.documentElement.style.setProperty("--rl-reader-rule", theme.rule);
+		doc.documentElement.style.setProperty("--rl-reader-quote", theme.quote);
 	}
 
-	doc.documentElement.style.colorScheme = theme.isDark ? "dark" : "light";
-	doc.documentElement.style.setProperty("--rl-reader-bg", theme.background);
-	doc.documentElement.style.setProperty("--rl-reader-text", theme.text);
-	doc.documentElement.style.setProperty("--rl-reader-muted", theme.muted);
-	doc.documentElement.style.setProperty("--rl-reader-accent", theme.accent);
-	doc.documentElement.style.setProperty("--rl-reader-rule", theme.rule);
-	doc.documentElement.style.setProperty("--rl-reader-quote", theme.quote);
+	const fontSize = getReaderFontSize();
+	if (typeof iframe.contentWindow?.__readingListSetFontSize === "function") {
+		iframe.contentWindow.__readingListSetFontSize(fontSize);
+	} else {
+		doc.documentElement.style.setProperty(
+			"--rl-reader-font-size",
+			`${fontSize}px`,
+		);
+	}
+}
+
+function getPdfReaderTheme() {
+	return document.documentElement.classList.contains("dark") ? "dark" : "light";
+}
+
+export function syncPdfReaderTheme() {
+	const iframe = state.readerIframe;
+	if (!iframe?.contentWindow) return;
+	iframe.contentWindow.postMessage(
+		{ type: "readinglist:theme", theme: getPdfReaderTheme() },
+		window.location.origin,
+	);
 }
 
 export function mountPdfReader(fileUrl, itemId, readerApi) {
@@ -352,7 +377,8 @@ export function mountPdfReader(fileUrl, itemId, readerApi) {
 	const iframe = document.createElement("iframe");
 	const progressQuery =
 		progressRatio === null ? "" : `&progress=${progressRatio}`;
-	iframe.src = `/pdf-reader.html?file=${encodeURIComponent(fileUrl)}${progressQuery}`;
+	const theme = getPdfReaderTheme();
+	iframe.src = `/pdf-reader.html?file=${encodeURIComponent(fileUrl)}${progressQuery}&theme=${theme}`;
 
 	dom.readerContent.replaceChildren(iframe);
 	state.readerIframe = iframe;

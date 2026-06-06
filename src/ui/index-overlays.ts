@@ -23,6 +23,11 @@ export function renderIndexOverlays() {
           <div class="reader-header-main">
             <div class="reader-title" id="reader-title">Loading...</div>
             <div class="reader-actions">
+              <div class="reader-font-controls" aria-label="Text size">
+                <button type="button" class="reader-btn reader-font-btn" id="reader-font-decrease" title="Decrease text size" aria-label="Decrease text size">A−</button>
+                <span class="reader-font-label" id="reader-font-label" aria-hidden="true">20px</span>
+                <button type="button" class="reader-btn reader-font-btn" id="reader-font-increase" title="Increase text size" aria-label="Increase text size">A+</button>
+              </div>
               <button type="button" class="reader-btn theme-toggle" id="reader-theme-toggle" aria-label="Theme" title="Theme: Device"><span class="theme-symbol theme-symbol-system" aria-hidden="true">◐</span><span class="theme-symbol theme-symbol-dark" aria-hidden="true">☾</span><span class="theme-symbol theme-symbol-light" aria-hidden="true">☼</span></button>
               <button type="button" class="reader-btn" id="reader-toggle-notes" title="Toggle notes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></button>
               <a href="#" id="reader-open-original" class="reader-btn" target="_blank" rel="noopener" title="Open original"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>
@@ -102,5 +107,6 @@ export function renderIndexOverlays() {
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
     <script type="module" src="/static/app.js"></script>`;
 }

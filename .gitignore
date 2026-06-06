@@ -33,3 +33,4 @@ build/
 
 # Local-only iOS app
 ios/
+ios_composer/

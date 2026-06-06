@@ -12,6 +12,7 @@ import {
 	setReaderSidebarOpen,
 	showReaderError,
 	syncOpenArticleTheme,
+	syncPdfReaderTheme,
 	toggleReaderSidebar,
 	unlockBackgroundScroll,
 } from "./reader-display.js";
@@ -307,5 +308,9 @@ export function initReader(app) {
 		readerApi.hideSelectionPopup?.();
 	});
 
-	document.addEventListener("readinglist:themechange", syncOpenArticleTheme);
+	document.addEventListener("readinglist:themechange", () => {
+		syncOpenArticleTheme();
+		syncPdfReaderTheme();
+	});
+	document.addEventListener("readinglist:fontsizechange", syncOpenArticleTheme);
 }

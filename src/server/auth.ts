@@ -116,13 +116,39 @@ function getLocalDevIdentity(c: AppContext) {
 	};
 }
 
+function readCookieValue(
+	cookieHeader: string | undefined,
+	name: string,
+): string {
+	if (!cookieHeader) return "";
+
+	for (const part of cookieHeader.split(";")) {
+		const trimmed = part.trim();
+		if (!trimmed.startsWith(`${name}=`)) continue;
+		try {
+			return decodeURIComponent(trimmed.slice(name.length + 1));
+		} catch {
+			return trimmed.slice(name.length + 1);
+		}
+	}
+
+	return "";
+}
+
+function getAccessJwtFromRequest(c: AppContext): string {
+	const headerToken = (c.req.header("cf-access-jwt-assertion") || "").trim();
+	if (headerToken) return headerToken;
+
+	return readCookieValue(c.req.header("cookie"), "CF_Authorization").trim();
+}
+
 export async function resolveRequestUser(c: AppContext) {
 	let identity = getLocalDevIdentity(c);
 
 	if (!identity && getConfiguredAuthMode() === "cloudflare") {
-		identity = await verifyAccessToken(
-			c.req.header("cf-access-jwt-assertion"),
-		).catch(() => null);
+		identity = await verifyAccessToken(getAccessJwtFromRequest(c)).catch(
+			() => null,
+		);
 	}
 
 	if (!identity?.email) {

@@ -342,3 +342,60 @@ export function getUploadContentType(type: string, filename: string): string {
 export function getUploadFileExtension(name: string): string {
 	return getFileExtension(name);
 }
+
+export type UploadImportResult =
+	| { ok: true; id: number; title: string; storedUrl: string }
+	| { ok: false; name: string; reason: string };
+
+export async function importUploadFileForUser(
+	userId: number,
+	file: File,
+	options: { title?: string; author?: string; tags?: string[] } = {},
+): Promise<UploadImportResult> {
+	let storedUrl = "";
+	try {
+		const extension = getUploadFileExtension(file.name);
+		if (!allowedUploadExtensions.has(extension)) {
+			return {
+				ok: false,
+				name: file.name,
+				reason: `Unsupported file type: .${extension || "unknown"}`,
+			};
+		}
+
+		const parsed = parseTitleAuthorFromFilename(file.name);
+		const title = options.title?.trim() || parsed.title || file.name;
+		const author = options.author?.trim() || parsed.author || "";
+		const storedFilename = createStoredFilename(file.name, extension);
+		storedUrl = `/uploads/${storedFilename}`;
+		const storedPath = resolveUploadPath(storedFilename);
+		if (!storedPath) {
+			throw new Error("Generated upload path is invalid.");
+		}
+
+		const fileBuffer = new Uint8Array(await file.arrayBuffer());
+		await Bun.write(storedPath, fileBuffer);
+
+		const type = detectUploadedFileType(extension);
+		const insertItem = db.query(
+			"INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, ?)",
+		);
+		const result = insertItem.run(userId, storedUrl, title, author, type);
+		attachTagsToItem(result.lastInsertRowid, userId, options.tags || []);
+
+		return {
+			ok: true,
+			id: Number(result.lastInsertRowid),
+			title,
+			storedUrl,
+		};
+	} catch (error: unknown) {
+		if (storedUrl) removeUploadedFileIfExists(storedUrl);
+		return {
+			ok: false,
+			name: file.name,
+			reason:
+				error instanceof Error ? error.message : "Failed to process file.",
+		};
+	}
+}

@@ -1,6 +1,7 @@
 {
   "name": "Reading List",
   "short_name": "Reading List",
+  "description": "Save articles, PDFs, and ebooks to read later",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -19,13 +20,24 @@
     }
   ],
   "share_target": {
-    "action": "/",
-    "method": "GET",
-    "enctype": "application/x-www-form-urlencoded",
+    "action": "/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
     "params": {
       "title": "title",
       "text": "text",
-      "url": "url"
+      "url": "url",
+      "files": [
+        {
+          "name": "files",
+          "accept": [
+            "application/pdf",
+            "application/epub+zip",
+            ".pdf",
+            ".epub"
+          ]
+        }
+      ]
     }
   }
 }

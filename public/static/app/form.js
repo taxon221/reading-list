@@ -5,6 +5,7 @@ import {
 	showUnauthorizedState,
 	state,
 } from "./shared.js";
+import { showToast } from "./toast.js";
 import {
 	extractUrlFromText,
 	getSupportedUploadFiles,
@@ -522,54 +523,114 @@ async function submitItemForm(app, event) {
 	}
 }
 
-function handleShareTarget() {
+function cleanShareParams() {
+	if (!window.location.search) return;
+	const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+	window.history.replaceState({}, document.title, cleanUrl);
+}
+
+function handleShareStatusParams(app) {
 	const params = new URLSearchParams(window.location.search);
-	if (!params.has("url") && !params.has("text") && !params.has("title")) {
+	const shareKind = params.get("share");
+	if (!shareKind) return false;
+
+	if (shareKind === "auth-required") {
+		showToast("Sign in to save shared content.", { type: "error" });
+		cleanShareParams();
+		return true;
+	}
+
+	if (shareKind === "empty") {
+		showToast("Nothing to add from that share.", { type: "error" });
+		cleanShareParams();
+		return true;
+	}
+
+	if (shareKind === "file-error") {
+		showToast(params.get("message") || "Could not import shared file.", {
+			type: "error",
+		});
+		cleanShareParams();
+		return true;
+	}
+
+	if (shareKind === "imported") {
+		const itemId = Number(params.get("item"));
+		const title = params.get("title") || "File";
+		showToast(`Added “${title}” to your reading list.`);
+		cleanShareParams();
+
+		if (Number.isFinite(itemId) && itemId > 0) {
+			const item = state.itemsById.get(itemId);
+			if (item && app.openReader) {
+				app.openReader(item.id, item.url, item.title, item.type);
+			}
+		}
+		return true;
+	}
+
+	return false;
+}
+
+async function handleShareTarget(app) {
+	if (handleShareStatusParams(app)) {
 		return;
 	}
 
+	const params = new URLSearchParams(window.location.search);
+	const shareKind = params.get("share");
 	const rawUrl = (params.get("url") || "").trim();
 	const rawText = (params.get("text") || "").trim();
 	const rawTitle = (params.get("title") || "").trim();
+
+	if (
+		!shareKind &&
+		!params.has("url") &&
+		!params.has("text") &&
+		!params.has("title")
+	) {
+		return;
+	}
+
+	if (state.isUnauthorized) {
+		showToast("Sign in to save shared content.", { type: "error" });
+		cleanShareParams();
+		return;
+	}
 
 	let sharedUrl = rawUrl;
 	if (!sharedUrl && rawText) {
 		sharedUrl = extractUrlFromText(rawText);
 	}
 
-	if (sharedUrl && isValidUrl(sharedUrl) && dom.urlInput) {
-		dom.urlInput.value = sharedUrl;
-		dom.urlInput.dispatchEvent(new Event("input", { bubbles: true }));
-	}
-
-	if (rawTitle && dom.titleInput && !dom.titleInput.value) {
-		dom.titleInput.value = rawTitle;
-	} else if (
-		rawText &&
-		dom.titleInput &&
-		!dom.titleInput.value &&
-		rawText !== sharedUrl
-	) {
-		dom.titleInput.value = rawText;
-	}
-
 	if (sharedUrl && isValidUrl(sharedUrl)) {
-		setTimeout(() => {
-			if (dom.urlInput?.value.trim() !== sharedUrl || !dom.form) return;
-			if (typeof dom.form.requestSubmit === "function") {
-				dom.form.requestSubmit();
-				return;
-			}
-			dom.form.dispatchEvent(
-				new Event("submit", { bubbles: true, cancelable: true }),
-			);
-		}, 350);
+		openAddModal("link");
+		if (dom.urlInput) {
+			dom.urlInput.value = sharedUrl;
+			dom.urlInput.dispatchEvent(new Event("input", { bubbles: true }));
+		}
+
+		if (rawTitle && dom.titleInput && !dom.titleInput.value) {
+			dom.titleInput.value = rawTitle;
+		} else if (
+			rawText &&
+			dom.titleInput &&
+			!dom.titleInput.value &&
+			rawText !== sharedUrl
+		) {
+			dom.titleInput.value = rawText;
+		}
+
+		cleanShareParams();
+
+		if (shareKind === "link") {
+			showToast("Review the link, then tap Add.");
+		}
+
+		return;
 	}
 
-	if (window.location.search) {
-		const cleanUrl = `${window.location.origin}${window.location.pathname}`;
-		window.history.replaceState({}, document.title, cleanUrl);
-	}
+	cleanShareParams();
 }
 
 function setRssStatus(message) {
@@ -751,5 +812,5 @@ export function initForm(app) {
 	initMetadataLookup();
 	dom.form?.addEventListener("submit", (event) => submitItemForm(app, event));
 
-	app.handleShareTarget = handleShareTarget;
+	app.handleShareTarget = () => handleShareTarget(app);
 }

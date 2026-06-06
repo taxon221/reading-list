@@ -1262,7 +1262,8 @@ body.modal-open {
     flex-direction: column;
     align-items: stretch;
     gap: 0.5rem;
-    padding: 0.5rem 1rem 0.75rem;
+    padding: max(0.5rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
+        0.75rem max(1rem, env(safe-area-inset-left));
     background: var(--bg-card);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
@@ -1322,6 +1323,44 @@ body.modal-open {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.reader-font-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0 0.125rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+}
+
+.reader-font-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+.reader-font-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.reader-font-label {
+    min-width: 2.5rem;
+    text-align: center;
+    font-size: 0.6875rem;
+    color: var(--text-light);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 600px) {
+    .reader-font-label {
+        display: none;
+    }
 }
 
 .reader-btn {
@@ -1747,4 +1786,53 @@ body.modal-open {
     background: var(--bg);
     color: var(--text);
     opacity: 1;
+}
+
+/* Toast notifications */
+.toast-container {
+    position: fixed;
+    left: 50%;
+    bottom: max(1rem, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 5000;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: min(92vw, 24rem);
+    pointer-events: none;
+}
+
+.toast {
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    opacity: 0;
+    transform: translateY(0.5rem);
+    transition:
+        opacity 0.2s ease,
+        transform 0.2s ease;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+.toast.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.toast-error {
+    border-color: rgba(239, 68, 68, 0.35);
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+:root.dark .toast-error {
+    background: #450a0a;
+    color: #fecaca;
+    border-color: rgba(239, 68, 68, 0.45);
 }
