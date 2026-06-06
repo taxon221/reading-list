@@ -86,6 +86,7 @@ export function parseTitle(html: string): string | null {
 }
 
 export function parseAuthor(html: string): string | null {
+	const title = parseTitle(html);
 	const patterns = [
 		/<meta[^>]*name=["']author["'][^>]*content=["']([^"']+)["']/i,
 		/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']author["']/i,
@@ -99,9 +100,18 @@ export function parseAuthor(html: string): string | null {
 		const match = html.match(pattern);
 		if (match?.[1]) {
 			const author = decodeHtmlEntities(match[1].trim()).replace(/^@/, "");
+			if (title && author.toLowerCase() === title.toLowerCase()) continue;
 			if (author) return author;
 		}
 	}
+
+	const virtualConsole = new VirtualConsole();
+	const dom = new JSDOM(html, { virtualConsole });
+	const authorLink = dom.window.document.querySelector(
+		'a[rel~="author"], a[href*="/author/"], a[href*="/authors/"]',
+	);
+	const author = authorLink?.textContent?.trim();
+	if (author) return author;
 
 	return null;
 }
