@@ -5,7 +5,7 @@ export function renderIndexMain() {
         <h1>Reading List</h1>
         <div class="header-actions">
           <div class="add-entry" id="add-entry">
-            <button type="button" class="import-btn add-menu-button" id="add-menu-button" aria-expanded="false" aria-haspopup="menu">Add ▾</button>
+            <button type="button" class="import-btn add-menu-button" id="add-menu-button" aria-expanded="false" aria-haspopup="menu" aria-keyshortcuts="A" title="Add (A)">Add ▾</button>
             <div class="dropdown-menu add-menu" id="add-menu" hidden>
               <button type="button" class="dropdown-option add-menu-option" data-add-type="link">Add link</button>
               <button type="button" class="dropdown-option add-menu-option" data-add-type="file">Add PDF / EPUB</button>
@@ -33,7 +33,7 @@ export function renderIndexMain() {
         <section class="search-section">
           <div class="search-shell" id="search-shell">
             <div class="search-token-list" id="search-token-list"></div>
-            <input type="text" id="search-input" class="search-input" placeholder='Search or add filters like \`type article\` or \`website != "less"\`' autocomplete="off" />
+            <input type="text" id="search-input" class="search-input" placeholder='Search or add filters like \`type article\` or \`website != "less"\`' autocomplete="off" aria-keyshortcuts="S" />
             <button type="button" class="search-action-btn" id="save-view-open">Save view</button>
             <div class="search-suggestions" id="search-suggestions" aria-live="polite"></div>
           </div>

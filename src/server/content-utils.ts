@@ -79,6 +79,16 @@ export function parseTitle(html: string): string | null {
 	);
 	if (twitterMatchAlt) return decodeHtmlEntities(twitterMatchAlt[1].trim());
 
+	const virtualConsole = new VirtualConsole();
+	const dom = new JSDOM(html, { virtualConsole });
+	const articleHeading = dom.window.document
+		.querySelector(
+			'h1.entry-title, h1.post-title, [itemprop="headline"], article h1, main h1',
+		)
+		?.textContent?.replace(/\s+/g, " ")
+		.trim();
+	if (articleHeading) return articleHeading;
+
 	const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
 	if (titleMatch) return decodeHtmlEntities(titleMatch[1].trim());
 

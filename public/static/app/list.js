@@ -172,6 +172,7 @@ export function initList(app) {
 			return true;
 		if (dom.noteModal && dom.noteModal.style.display !== "none") return true;
 		if (dom.editModal && dom.editModal.style.display !== "none") return true;
+		if (dom.addModal && dom.addModal.style.display !== "none") return true;
 		if (dom.saveViewModal && dom.saveViewModal.style.display !== "none")
 			return true;
 		if (dom.accountModalOverlay && !dom.accountModalOverlay.hidden) return true;
@@ -190,7 +191,7 @@ export function initList(app) {
 		if (key === "s") {
 			dom.searchInput?.focus();
 		} else {
-			dom.urlInput?.focus();
+			app.openAddModal?.("link");
 		}
 	});
 }

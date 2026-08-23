@@ -434,15 +434,24 @@ function initMetadataLookup() {
 
 		if (state.addMode === "rss") return;
 
+		const initialTitle = dom.titleInput?.value || "";
+		const initialAuthor = dom.authorInput?.value || "";
+		const initialType = dom.typeSelect?.value || "article";
 		state.fetchTimeout = setTimeout(async () => {
 			state.isFetching = true;
 			if (dom.submitBtn) dom.submitBtn.textContent = "...";
 			const meta = await fetchMetadata(url);
 			if (meta && dom.urlInput?.value.trim() === url) {
 				state.fetchedMeta = meta;
-				if (dom.titleInput) dom.titleInput.value = meta.title || "";
-				if (dom.authorInput) dom.authorInput.value = meta.author || "";
-				if (dom.typeSelect) dom.typeSelect.value = meta.type || "article";
+				if (dom.titleInput?.value === initialTitle) {
+					dom.titleInput.value = meta.title || "";
+				}
+				if (dom.authorInput?.value === initialAuthor) {
+					dom.authorInput.value = meta.author || "";
+				}
+				if (dom.typeSelect?.value === initialType) {
+					dom.typeSelect.value = meta.type || "article";
+				}
 			}
 			state.isFetching = false;
 			if (dom.submitBtn) dom.submitBtn.textContent = "Add";
@@ -745,9 +754,6 @@ function initAddMenu() {
 	});
 	dom.addModalClose?.addEventListener("click", closeAddModal);
 	dom.addModalCancel?.addEventListener("click", closeAddModal);
-	dom.addModal?.addEventListener("click", (event) => {
-		if (event.target === dom.addModal) closeAddModal();
-	});
 	dom.addFilePicker?.addEventListener("click", () => dom.fileUploadInput?.click());
 	document.addEventListener("click", (event) => {
 		if (dom.addEntry?.contains(event.target)) return;
@@ -813,4 +819,5 @@ export function initForm(app) {
 	dom.form?.addEventListener("submit", (event) => submitItemForm(app, event));
 
 	app.handleShareTarget = () => handleShareTarget(app);
+	app.openAddModal = openAddModal;
 }
