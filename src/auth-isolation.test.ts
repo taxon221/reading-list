@@ -67,6 +67,7 @@ function dropAllTables() {
 	for (const table of [
 		"rss_subscription_seen",
 		"rss_subscriptions",
+		"uploaded_files",
 		"item_tags",
 		"highlights",
 		"user_preferences",
@@ -496,9 +497,12 @@ describe("auth and user isolation", () => {
 			.query("SELECT id FROM users WHERE email = ?")
 			.get(secondUserEmail) as { id: number } | undefined;
 
-		db.query(
+		const ownedItem = db.query(
 			"INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, ?)",
 		).run(adminUser?.id, "/uploads/owned.pdf", "Owned PDF", "", "pdf");
+		db.query(
+			"INSERT INTO uploaded_files (item_id, filename, media_type) VALUES (?, ?, 'pdf')",
+		).run(ownedItem.lastInsertRowid, "owned.pdf");
 
 		db.query(
 			"INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, ?)",
@@ -527,6 +531,29 @@ describe("auth and user isolation", () => {
 			secondUserEmail,
 		);
 		expect(blockedResponse.status).toBe(404);
+
+		const forgedItem = db
+			.query(
+				"INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, ?)",
+			)
+			.run(secondUser?.id, "/uploads/owned.pdf", "Forged PDF", "", "pdf");
+		expect(
+			(await api("/api/uploads/owned.pdf", {}, secondUserEmail)).status,
+		).toBe(404);
+		expect(
+			(
+				await api(
+					`/api/items/${forgedItem.lastInsertRowid}`,
+					{ method: "DELETE" },
+					secondUserEmail,
+				)
+			).status,
+		).toBe(200);
+		expect(
+			await (
+				await api("/api/uploads/owned.pdf", {}, bootstrapAdminEmail)
+			).text(),
+		).toBe("owned-pdf");
 	});
 
 	test("migrates legacy single-user data to the bootstrap admin", async () => {

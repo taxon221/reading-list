@@ -245,7 +245,7 @@ export function registerContentRoutes(app: Hono<AppBindings>) {
 
 		return new Response(Bun.file(upload.path), {
 			headers: {
-				"Content-Type": getUploadContentType(upload.type, filename),
+				"Content-Type": getUploadContentType(upload.mediaType),
 				"Cache-Control": "no-store",
 			},
 		});

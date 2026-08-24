@@ -182,10 +182,19 @@ export function attachTagsToItem(
 	}
 }
 
-export function deleteOwnedItem(currentUser: CurrentUser, id: number): boolean {
-	const item = getOwnedItem(id, currentUser.id) as { url: string } | null;
+export function deleteOwnedItem(
+	currentUser: CurrentUser,
+	id: number,
+): string | null | false {
+	const item = db
+		.query(
+			`SELECT uf.filename
+			 FROM items i
+			 LEFT JOIN uploaded_files uf ON uf.item_id = i.id
+			 WHERE i.id = ? AND i.user_id = ?`,
+		)
+		.get(id, currentUser.id) as { filename: string | null } | undefined;
 	if (!item) return false;
-	if (item.url) removeUploadedFileIfExists(item.url);
 	db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
 	db.query("DELETE FROM highlights WHERE item_id = ? AND user_id = ?").run(
 		id,
@@ -195,7 +204,7 @@ export function deleteOwnedItem(currentUser: CurrentUser, id: number): boolean {
 		id,
 		currentUser.id,
 	);
-	return true;
+	return item.filename;
 }
 
 function getFileExtension(name: string): string {
@@ -276,13 +285,6 @@ export function parseUploadTags(raw: string | null): string[] {
 	return [];
 }
 
-function getUploadFilename(url: string): string | null {
-	if (!url.startsWith("/uploads/")) return null;
-	const filename = url.slice("/uploads/".length);
-	if (!/^[a-zA-Z0-9._-]+$/.test(filename)) return null;
-	return filename;
-}
-
 export function resolveUploadPath(filename: string): string | null {
 	if (!/^[a-zA-Z0-9._-]+$/.test(filename)) return null;
 
@@ -298,10 +300,7 @@ export function resolveUploadPath(filename: string): string | null {
 	return filePath;
 }
 
-export function removeUploadedFileIfExists(url: string) {
-	const filename = getUploadFilename(url);
-	if (!filename) return;
-
+export function removeUploadedFile(filename: string) {
 	const filePath = resolveUploadPath(filename);
 	if (!filePath) return;
 	if (!existsSync(filePath)) return;
@@ -311,32 +310,49 @@ export function removeUploadedFileIfExists(url: string) {
 	} catch {}
 }
 
+export function getOwnedUploadMapping(
+	itemId: string | number | bigint,
+	userId: number,
+): { filename: string; media_type: "pdf" | "epub" } | null {
+	return (
+		(db
+			.query(
+				`SELECT uf.filename, uf.media_type
+				 FROM uploaded_files uf
+				 JOIN items i ON i.id = uf.item_id
+				 WHERE uf.item_id = ? AND i.user_id = ?`,
+			)
+			.get(itemId, userId) as
+			| { filename: string; media_type: "pdf" | "epub" }
+			| undefined) || null
+	);
+}
+
 export function getOwnedUploadFile(
 	filename: string,
 	userId: number,
-): { path: string; type: string } | null {
+): { path: string; mediaType: "pdf" | "epub" } | null {
 	const filePath = resolveUploadPath(filename);
 	if (!filePath) return null;
 
-	const item = db
-		.query("SELECT type FROM items WHERE user_id = ? AND url = ? LIMIT 1")
-		.get(userId, `/uploads/${filename}`) as { type: string } | undefined;
+	const mapping = db
+		.query(
+			`SELECT uf.media_type
+			 FROM uploaded_files uf
+			 JOIN items i ON i.id = uf.item_id
+			 WHERE uf.filename = ? AND i.user_id = ? AND i.url = ?`,
+		)
+		.get(filename, userId, `/uploads/${filename}`) as
+		| { media_type: "pdf" | "epub" }
+		| undefined;
 
-	if (!item || !existsSync(filePath)) return null;
+	if (!mapping || !existsSync(filePath)) return null;
 
-	return { path: filePath, type: item.type };
+	return { path: filePath, mediaType: mapping.media_type };
 }
 
-export function getUploadContentType(type: string, filename: string): string {
-	if (type === "pdf" || filename.toLowerCase().endsWith(".pdf")) {
-		return "application/pdf";
-	}
-
-	if (type === "ebook" || filename.toLowerCase().endsWith(".epub")) {
-		return "application/epub+zip";
-	}
-
-	return "application/octet-stream";
+export function getUploadContentType(mediaType: "pdf" | "epub"): string {
+	return mediaType === "pdf" ? "application/pdf" : "application/epub+zip";
 }
 
 export function getUploadFileExtension(name: string): string {
@@ -353,6 +369,7 @@ export async function importUploadFileForUser(
 	options: { title?: string; author?: string; tags?: string[] } = {},
 ): Promise<UploadImportResult> {
 	let storedUrl = "";
+	let storedFilename = "";
 	try {
 		const extension = getUploadFileExtension(file.name);
 		if (!allowedUploadExtensions.has(extension)) {
@@ -366,7 +383,7 @@ export async function importUploadFileForUser(
 		const parsed = parseTitleAuthorFromFilename(file.name);
 		const title = options.title?.trim() || parsed.title || file.name;
 		const author = options.author?.trim() || parsed.author || "";
-		const storedFilename = createStoredFilename(file.name, extension);
+		storedFilename = createStoredFilename(file.name, extension);
 		storedUrl = `/uploads/${storedFilename}`;
 		const storedPath = resolveUploadPath(storedFilename);
 		if (!storedPath) {
@@ -377,20 +394,28 @@ export async function importUploadFileForUser(
 		await Bun.write(storedPath, fileBuffer);
 
 		const type = detectUploadedFileType(extension);
-		const insertItem = db.query(
-			"INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, ?)",
-		);
-		const result = insertItem.run(userId, storedUrl, title, author, type);
-		attachTagsToItem(result.lastInsertRowid, userId, options.tags || []);
+		const insertUpload = db.transaction(() => {
+			const result = db
+				.query(
+					"INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, ?)",
+				)
+				.run(userId, storedUrl, title, author, type);
+			db.query(
+				"INSERT INTO uploaded_files (item_id, filename, media_type) VALUES (?, ?, ?)",
+			).run(result.lastInsertRowid, storedFilename, extension);
+			attachTagsToItem(result.lastInsertRowid, userId, options.tags || []);
+			return Number(result.lastInsertRowid);
+		});
+		const itemId = insertUpload();
 
 		return {
 			ok: true,
-			id: Number(result.lastInsertRowid),
+			id: itemId,
 			title,
 			storedUrl,
 		};
 	} catch (error: unknown) {
-		if (storedUrl) removeUploadedFileIfExists(storedUrl);
+		if (storedFilename) removeUploadedFile(storedFilename);
 		return {
 			ok: false,
 			name: file.name,

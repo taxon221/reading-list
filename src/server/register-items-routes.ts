@@ -8,8 +8,9 @@ import {
 	getItemTags,
 	getOwnedHighlight,
 	getOwnedItem,
+	getOwnedUploadMapping,
 	getUserSavedViews,
-	removeUploadedFileIfExists,
+	removeUploadedFile,
 	setUserSavedViews,
 } from "./item-store";
 import type { AppBindings, ItemRow } from "./types";
@@ -188,6 +189,9 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			await c.req.json();
 
 		if (!url) return c.json({ error: "URL is required" }, 400);
+		if (String(url).startsWith("/uploads/")) {
+			return c.json({ error: "Use the upload endpoint for local files" }, 400);
+		}
 		const previewImage = normalizeStoredPreviewImage(preview_image);
 		const readingTimeMinutes = Number.isInteger(reading_time_minutes)
 			? Number(reading_time_minutes)
@@ -322,9 +326,14 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		} | null;
 
 		if (!existingItem) return c.json({ error: "Item not found" }, 404);
+		if (!url) return c.json({ error: "URL is required" }, 400);
 
-		if (existingItem.url && existingItem.url !== url) {
-			removeUploadedFileIfExists(existingItem.url);
+		const upload = getOwnedUploadMapping(id, currentUser.id);
+		if (
+			String(url).startsWith("/uploads/") &&
+			(!upload || url !== existingItem.url || url !== `/uploads/${upload.filename}`)
+		) {
+			return c.json({ error: "Uploaded file URL cannot be changed" }, 400);
 		}
 
 		const nextAuthor =
@@ -354,6 +363,10 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 
 		db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
 		attachTagsToItem(id, currentUser.id, tags);
+		if (upload && url !== existingItem.url) {
+			db.query("DELETE FROM uploaded_files WHERE item_id = ?").run(id);
+			removeUploadedFile(upload.filename);
+		}
 
 		return c.json({ success: true });
 	});
@@ -431,13 +444,18 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 
 		const deleteTx = db.transaction((itemIds: number[]) => {
 			let deleted = 0;
+			const uploads: string[] = [];
 			for (const id of itemIds) {
-				if (deleteOwnedItem(currentUser, id)) deleted++;
+				const filename = deleteOwnedItem(currentUser, id);
+				if (filename === false) continue;
+				deleted++;
+				if (filename) uploads.push(filename);
 			}
-			return deleted;
+			return { deleted, uploads };
 		});
 
-		const deleted = deleteTx(ids);
+		const { deleted, uploads } = deleteTx(ids);
+		for (const filename of uploads) removeUploadedFile(filename);
 		return c.json({ success: true, deleted });
 	});
 
@@ -448,9 +466,11 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		if (!Number.isFinite(numericId)) {
 			return c.json({ error: "Item not found" }, 404);
 		}
-		if (!deleteOwnedItem(currentUser, numericId)) {
+		const upload = deleteOwnedItem(currentUser, numericId);
+		if (upload === false) {
 			return c.json({ error: "Item not found" }, 404);
 		}
+		if (upload) removeUploadedFile(upload);
 		return c.json({ success: true });
 	});
 

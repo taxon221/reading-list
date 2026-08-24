@@ -145,6 +145,35 @@ function createItemTagsTable() {
   `);
 }
 
+function createUploadedFilesTable() {
+	db.run(`
+    CREATE TABLE IF NOT EXISTS uploaded_files (
+      item_id INTEGER PRIMARY KEY,
+      filename TEXT NOT NULL UNIQUE,
+      media_type TEXT NOT NULL CHECK (media_type IN ('pdf', 'epub')),
+      FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+function syncUploadedFilesSchema() {
+	createUploadedFilesTable();
+	const insertUpload = db.query(
+		"INSERT OR IGNORE INTO uploaded_files (item_id, filename, media_type) VALUES (?, ?, ?)",
+	);
+	const items = db
+		.query("SELECT id, url FROM items WHERE url LIKE '/uploads/%' ORDER BY id")
+		.all() as Array<{ id: number; url: string }>;
+
+	for (const item of items) {
+		const filename = item.url.slice("/uploads/".length);
+		if (!/^[a-zA-Z0-9._-]+$/.test(filename)) continue;
+		const mediaType = filename.toLowerCase().endsWith(".pdf") ? "pdf" : "epub";
+		if (!filename.toLowerCase().endsWith(`.${mediaType}`)) continue;
+		insertUpload.run(item.id, filename, mediaType);
+	}
+}
+
 function createHighlightsTable() {
 	db.run(`
     CREATE TABLE IF NOT EXISTS highlights (
@@ -318,6 +347,7 @@ export function initDb() {
 			syncItemsSchema(bootstrapAdminId);
 			syncTagsSchema(bootstrapAdminId);
 			createItemTagsTable();
+			syncUploadedFilesSchema();
 			syncHighlightsSchema(bootstrapAdminId);
 			createRssSubscriptionsTable();
 			createRssSubscriptionSeenTable();
