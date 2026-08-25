@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseTitle } from "./content-utils";
+import { getSafeRemoteUrl, parseTitle } from "./content-utils";
 
 describe("article metadata parsing", () => {
 	test("prefers an article heading over a site-decorated document title", () => {
@@ -13,5 +13,12 @@ describe("article metadata parsing", () => {
 		expect(parseTitle(html)).toBe(
 			"Self-hosting in the era of LLMs and cheap compute",
 		);
+	});
+
+	test("rejects private remote targets", async () => {
+		expect(await getSafeRemoteUrl("http://127.0.0.1/private")).toBeNull();
+		expect(
+			await getSafeRemoteUrl("https://user:pass@example.com/private"),
+		).toBeNull();
 	});
 });

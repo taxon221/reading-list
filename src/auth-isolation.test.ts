@@ -43,6 +43,7 @@ Bun.env.BOOTSTRAP_ADMIN_EMAIL = bootstrapAdminEmail;
 Bun.env.CLOUDFLARE_ACCESS_TEAM_DOMAIN = accessIssuer;
 Bun.env.CLOUDFLARE_ACCESS_AUD = accessAudience;
 Bun.env.AUTH_MODE = "cloudflare";
+Bun.env.RSS_ALLOW_PRIVATE_HOSTS = "true";
 
 const { db, initDb } = await import("./db");
 const appModule = await import("./index");

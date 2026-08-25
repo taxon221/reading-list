@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { readResponseText, withRemoteResponse } from "./content-utils";
 import { attachTagsToItem } from "./item-store";
 
 export type RssSubscriptionRow = {
@@ -87,14 +88,27 @@ export function parseRssFeed(xml: string): ParsedFeed {
 }
 
 async function fetchFeed(feedUrl: string): Promise<ParsedFeed> {
-	const response = await fetch(feedUrl, {
-		headers: { "User-Agent": "ReadingListRSS/1.0" },
-	});
-	if (!response.ok) {
-		throw new Error(`Feed returned HTTP ${response.status}`);
-	}
-	const xml = await response.text();
-	return parseRssFeed(xml);
+	const feed = await withRemoteResponse(
+		feedUrl,
+		{
+			allowPrivate:
+				Bun.env.RSS_ALLOW_PRIVATE_HOSTS?.trim().toLowerCase() === "true",
+			timeoutMs: 15000,
+			headers: { "User-Agent": "ReadingListRSS/1.0" },
+		},
+		async (response) => {
+			if (!response.ok) {
+				throw new Error(`Feed returned HTTP ${response.status}`);
+			}
+			const xml = await readResponseText(response, 5 * 1024 * 1024);
+			if (!/<(?:rss|channel)(?:\s|>)/i.test(xml)) {
+				throw new Error("URL did not return an RSS feed");
+			}
+			return parseRssFeed(xml);
+		},
+	);
+	if (!feed) throw new Error("Feed URL is not allowed");
+	return feed;
 }
 
 function itemExistsForUser(userId: number, url: string): boolean {

@@ -282,54 +282,51 @@ function estimateReadingTimeMinutes(
 export async function fetchRemoteMetadata(
 	rawUrl: string,
 ): Promise<RemoteMetadata | null> {
-	const safeUrl = await getSafeRemoteUrl(rawUrl);
-	if (!safeUrl) return null;
-
 	try {
-		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), 8000);
-
-		const response = await fetch(safeUrl, {
-			signal: controller.signal,
-			redirect: "manual",
-			headers: {
-				"User-Agent": "Mozilla/5.0 (compatible; ReadingListBot/1.0)",
-				Accept:
-					"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		return await withRemoteResponse(
+			rawUrl,
+			{
+				timeoutMs: 8000,
+				headers: {
+					"User-Agent": "Mozilla/5.0 (compatible; ReadingListBot/1.0)",
+					Accept:
+						"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+				},
 			},
-		});
+			async (response, finalUrl) => {
+				if (!response.ok) return buildRemoteMetadataFallback(finalUrl);
+				const contentType = response.headers.get("content-type") || "";
+				const type = detectType(finalUrl, contentType);
+				let title: string | null = null;
+				let author: string | null = null;
+				let image: string | null = null;
+				let readingTimeMinutes: number | null = null;
 
-		clearTimeout(timeout);
+				if (
+					contentType.includes("text/html") ||
+					contentType.includes("application/xhtml")
+				) {
+					const html = await readResponseText(response);
+					title = parseTitle(html);
+					author = parseAuthor(html);
+					image = parsePreviewImage(html, finalUrl);
+					if (type === "article") {
+						readingTimeMinutes = estimateReadingTimeMinutes(html, finalUrl);
+					}
+				}
 
-		const contentType = response.headers.get("content-type") || "";
-		const type = detectType(safeUrl, contentType);
-		let title: string | null = null;
-		let author: string | null = null;
-		let image: string | null = null;
-		let readingTimeMinutes: number | null = null;
-
-		if (
-			contentType.includes("text/html") ||
-			contentType.includes("application/xhtml")
-		) {
-			const html = await response.text();
-			title = parseTitle(html);
-			author = parseAuthor(html);
-			image = parsePreviewImage(html, safeUrl);
-			if (type === "article") {
-				readingTimeMinutes = estimateReadingTimeMinutes(html, safeUrl);
-			}
-		}
-
-		return {
-			title: title || getFallbackTitle(safeUrl),
-			type,
-			author,
-			image,
-			reading_time_minutes: readingTimeMinutes,
-		};
+				return {
+					title: title || getFallbackTitle(finalUrl),
+					type,
+					author,
+					image,
+					reading_time_minutes: readingTimeMinutes,
+				};
+			},
+		);
 	} catch {
-		return buildRemoteMetadataFallback(safeUrl);
+		const safeUrl = await getSafeRemoteUrl(rawUrl);
+		return safeUrl ? buildRemoteMetadataFallback(safeUrl) : null;
 	}
 }
 
@@ -404,7 +401,10 @@ export function extractArticleContent(html: string, sourceUrl: string) {
 }
 
 function isPrivateIpAddress(address: string): boolean {
-	const normalized = address.toLowerCase().replace(/^::ffff:/, "");
+	const normalized = address
+		.toLowerCase()
+		.replace(/^\[|\]$/g, "")
+		.replace(/^::ffff:/, "");
 	const version = isIP(normalized);
 
 	if (version === 4) {
@@ -412,26 +412,33 @@ function isPrivateIpAddress(address: string): boolean {
 		return (
 			a === 0 ||
 			a === 10 ||
+			(a === 100 && b >= 64 && b <= 127) ||
 			a === 127 ||
 			(a === 169 && b === 254) ||
 			(a === 172 && b >= 16 && b <= 31) ||
-			(a === 192 && b === 168)
+			(a === 192 && (b === 0 || b === 168)) ||
+			(a === 198 && (b === 18 || b === 19)) ||
+			a >= 224
 		);
 	}
 
 	if (version === 6) {
 		return (
+			normalized === "::" ||
 			normalized === "::1" ||
 			normalized.startsWith("fc") ||
 			normalized.startsWith("fd") ||
-			normalized.startsWith("fe80:")
+			/^fe[89ab]/.test(normalized) ||
+			normalized.startsWith("ff")
 		);
 	}
 
 	return false;
 }
 
-export async function getSafeRemoteUrl(rawUrl: string): Promise<string | null> {
+type RemoteTarget = { addresses: string[] | null; url: string };
+
+async function getSafeRemoteTarget(rawUrl: string): Promise<RemoteTarget | null> {
 	let parsed: URL;
 	try {
 		parsed = new URL(rawUrl);
@@ -447,7 +454,7 @@ export async function getSafeRemoteUrl(rawUrl: string): Promise<string | null> {
 		return null;
 	}
 
-	const hostname = parsed.hostname.toLowerCase();
+	const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
 	if (
 		!hostname ||
 		hostname === "localhost" ||
@@ -461,6 +468,7 @@ export async function getSafeRemoteUrl(rawUrl: string): Promise<string | null> {
 		return null;
 	}
 
+	let addresses: string[];
 	try {
 		const records = await lookup(hostname, { all: true, verbatim: true });
 		if (
@@ -469,11 +477,147 @@ export async function getSafeRemoteUrl(rawUrl: string): Promise<string | null> {
 		) {
 			return null;
 		}
+		addresses = [...new Set(records.map((record) => record.address))];
 	} catch {
 		return null;
 	}
 
-	return parsed.toString();
+	return { addresses, url: parsed.toString() };
+}
+
+export async function getSafeRemoteUrl(rawUrl: string): Promise<string | null> {
+	return (await getSafeRemoteTarget(rawUrl))?.url || null;
+}
+
+function getAllowedRemoteTarget(rawUrl: string): RemoteTarget | null {
+	try {
+		const parsed = new URL(rawUrl);
+		if (
+			!["http:", "https:"].includes(parsed.protocol) ||
+			parsed.username ||
+			parsed.password
+		) {
+			return null;
+		}
+		return { addresses: null, url: parsed.toString() };
+	} catch {
+		return null;
+	}
+}
+
+type RemoteFetchOptions = Omit<RequestInit, "redirect" | "signal"> & {
+	allowPrivate?: boolean;
+	maxRedirects?: number;
+	timeoutMs?: number;
+};
+
+async function fetchRemoteTarget(
+	target: RemoteTarget,
+	options: Omit<RequestInit, "redirect" | "signal">,
+	signal: AbortSignal,
+): Promise<Response> {
+	if (!target.addresses) {
+		return fetch(target.url, { ...options, redirect: "manual", signal });
+	}
+
+	const originalUrl = new URL(target.url);
+	let lastError: unknown;
+	for (const address of target.addresses) {
+		try {
+			const requestUrl = new URL(target.url);
+			requestUrl.hostname = isIP(address) === 6 ? `[${address}]` : address;
+			const headers = new Headers(options.headers);
+			headers.set("Host", originalUrl.host);
+			const tls =
+				originalUrl.protocol === "https:" && !isIP(originalUrl.hostname)
+					? { serverName: originalUrl.hostname }
+					: undefined;
+			return await fetch(requestUrl, {
+				...options,
+				headers,
+				redirect: "manual",
+				signal,
+				tls,
+			});
+		} catch (error) {
+			if (signal.aborted) throw error;
+			lastError = error;
+		}
+	}
+	throw lastError || new Error("Remote request failed");
+}
+
+export async function withRemoteResponse<T>(
+	rawUrl: string,
+	options: RemoteFetchOptions,
+	consume: (response: Response, finalUrl: string) => Promise<T>,
+): Promise<T | null> {
+	const {
+		allowPrivate = false,
+		maxRedirects = 5,
+		timeoutMs = 15000,
+		...fetchOptions
+	} = options;
+	const validate = allowPrivate ? getAllowedRemoteTarget : getSafeRemoteTarget;
+	let target = await validate(rawUrl);
+	if (!target) return null;
+
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		for (let redirects = 0; redirects <= maxRedirects; redirects++) {
+			const response = await fetchRemoteTarget(
+				target,
+				fetchOptions,
+				controller.signal,
+			);
+			if (![301, 302, 303, 307, 308].includes(response.status)) {
+				return await consume(response, target.url);
+			}
+
+			const location = response.headers.get("location");
+			await response.body?.cancel().catch(() => undefined);
+			if (!location || redirects === maxRedirects) {
+				throw new Error("Remote resource redirected too many times");
+			}
+			target = await validate(new URL(location, target.url).toString());
+			if (!target) throw new Error("Remote redirect is not allowed");
+		}
+		throw new Error("Remote resource redirected too many times");
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+export async function readResponseText(
+	response: Response,
+	maxBytes = 8 * 1024 * 1024,
+): Promise<string> {
+	const declaredSize = Number(response.headers.get("content-length"));
+	if (Number.isFinite(declaredSize) && declaredSize > maxBytes) {
+		throw new Error(`Remote response exceeds ${maxBytes} bytes`);
+	}
+	if (!response.body) return "";
+
+	const reader = response.body.getReader();
+	const decoder = new TextDecoder();
+	let received = 0;
+	let text = "";
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			received += value.byteLength;
+			if (received > maxBytes) {
+				await reader.cancel();
+				throw new Error(`Remote response exceeds ${maxBytes} bytes`);
+			}
+			text += decoder.decode(value, { stream: true });
+		}
+		return text + decoder.decode();
+	} finally {
+		reader.releaseLock();
+	}
 }
 
 export function getFallbackTitle(url: string): string {
