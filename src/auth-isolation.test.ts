@@ -178,6 +178,17 @@ describe("auth and user isolation", () => {
 		const response = await api("/api/items");
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual([]);
+		expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+
+		const crossOriginForm = await api("/api/import/file", {
+			method: "POST",
+			headers: {
+				"Content-Type": "text/plain",
+				Origin: "https://evil.example",
+			},
+			body: "blocked",
+		});
+		expect(crossOriginForm.status).toBe(403);
 	});
 
 	test("keeps items, tags, and highlights isolated per user", async () => {

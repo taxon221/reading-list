@@ -11,6 +11,10 @@ type AccessConfig = {
 	issuer: string;
 };
 
+let cachedJwks:
+	| { certsUrl: string; value: ReturnType<typeof createRemoteJWKSet> }
+	| undefined;
+
 function normalizeEmail(value: string | undefined | null): string {
 	return (value || "").trim().toLowerCase();
 }
@@ -49,9 +53,12 @@ export async function verifyAccessToken(
 	const accessConfig = getAccessConfig();
 	if (!accessConfig) return null;
 
-	const cloudflareJwks = createRemoteJWKSet(accessConfig.certsUrl);
+	const certsUrl = accessConfig.certsUrl.toString();
+	if (!cachedJwks || cachedJwks.certsUrl !== certsUrl) {
+		cachedJwks = { certsUrl, value: createRemoteJWKSet(accessConfig.certsUrl) };
+	}
 
-	const { payload } = await jwtVerify(token, cloudflareJwks, {
+	const { payload } = await jwtVerify(token, cachedJwks.value, {
 		issuer: accessConfig.issuer,
 		audience: accessConfig.audience,
 	});

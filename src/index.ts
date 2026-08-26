@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
-import { cors } from "hono/cors";
+import { csrf } from "hono/csrf";
+import { secureHeaders } from "hono/secure-headers";
 import { initDb } from "./db";
 import {
 	getAppLogoutTarget,
@@ -18,10 +19,22 @@ import { renderIndexPage } from "./ui/index-page";
 
 const app = new Hono<AppBindings>();
 const indexPage = renderIndexPage();
+const protectBrowserForms = csrf();
 
 initDb();
 
-app.use("/*", cors());
+app.use(
+	"/*",
+	secureHeaders({
+		crossOriginOpenerPolicy: false,
+		strictTransportSecurity: false,
+		permissionsPolicy: { camera: [], geolocation: [], microphone: [] },
+	}),
+);
+app.use("/api/*", (c, next) => {
+	if (!c.req.header("origin") && !c.req.header("sec-fetch-site")) return next();
+	return protectBrowserForms(c, next);
+});
 app.use("/*", async (c, next) => {
 	await next();
 
