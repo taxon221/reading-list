@@ -263,9 +263,18 @@ function createIndexes() {
 		"CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON user_preferences(user_id)",
 	);
 	db.run("CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id)");
+	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_items_user_created_at ON items(user_id, created_at DESC, id DESC)",
+	);
 	db.run("CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id)");
 	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_item_tags_tag_item ON item_tags(tag_id, item_id)",
+	);
+	db.run(
 		"CREATE INDEX IF NOT EXISTS idx_highlights_user_id ON highlights(user_id)",
+	);
+	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_highlights_user_item ON highlights(user_id, item_id)",
 	);
 	db.run(
 		"CREATE INDEX IF NOT EXISTS idx_rss_subscriptions_user_id ON rss_subscriptions(user_id)",

@@ -15,6 +15,11 @@ import {
 } from "./item-store";
 import type { AppBindings, ItemRow } from "./types";
 
+type ItemListRow = ItemRow & {
+	highlight_count: number;
+	tags_json: string;
+};
+
 function shouldAutoMarkRead(progress: unknown) {
 	if (!progress || typeof progress !== "object") return false;
 
@@ -55,14 +60,40 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			: [];
 		const types = typesParam ? typesParam.split(",").filter(Boolean) : [];
 
-		let query = "SELECT * FROM items WHERE user_id = ?";
+		let query = `
+			WITH tag_data AS (
+				SELECT item_id, json_group_array(name) AS tags_json
+				FROM (
+					SELECT it.item_id, t.name
+					FROM item_tags it
+					JOIN tags t ON t.id = it.tag_id
+					WHERE t.user_id = ?
+					ORDER BY it.item_id, t.name
+				)
+				GROUP BY item_id
+			), highlight_data AS (
+				SELECT item_id, COUNT(*) AS highlight_count
+				FROM highlights
+				WHERE user_id = ?
+				GROUP BY item_id
+			)
+			SELECT i.*, COALESCE(td.tags_json, '[]') AS tags_json,
+				COALESCE(hd.highlight_count, 0) AS highlight_count
+			FROM items i
+			LEFT JOIN tag_data td ON td.item_id = i.id
+			LEFT JOIN highlight_data hd ON hd.item_id = i.id
+			WHERE i.user_id = ?`;
 		const conditions: string[] = [];
-		const params: Array<string | number> = [currentUser.id];
+		const params: Array<string | number> = [
+			currentUser.id,
+			currentUser.id,
+			currentUser.id,
+		];
 
 		if (tags.length > 0) {
 			const placeholders = tags.map(() => "?").join(",");
 			conditions.push(
-				`id IN (
+				`i.id IN (
           SELECT it.item_id FROM item_tags it
           JOIN tags t ON it.tag_id = t.id
           WHERE t.user_id = ? AND t.name IN (${placeholders})
@@ -75,7 +106,7 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		if (excludeTags.length > 0) {
 			const placeholders = excludeTags.map(() => "?").join(",");
 			conditions.push(
-				`id NOT IN (
+				`i.id NOT IN (
           SELECT it.item_id FROM item_tags it
           JOIN tags t ON it.tag_id = t.id
           WHERE t.user_id = ? AND t.name IN (${placeholders})
@@ -87,7 +118,7 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 
 		if (types.length > 0) {
 			const placeholders = types.map(() => "?").join(",");
-			conditions.push(`type IN (${placeholders})`);
+			conditions.push(`i.type IN (${placeholders})`);
 			params.push(...types);
 		}
 
@@ -95,22 +126,15 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			query += ` AND ${conditions.join(" AND ")}`;
 		}
 
-		query += " ORDER BY created_at DESC";
+		query += " ORDER BY i.created_at DESC, i.id DESC";
 
-		const items = db.query(query).all(...params);
-		const itemsWithTags = items.map((item) => {
-			const typedItem = item as ItemRow;
-			const tags = getItemTags(typedItem.id, currentUser.id);
-			const highlightCount = db
-				.query(
-					"SELECT COUNT(*) as count FROM highlights WHERE item_id = ? AND user_id = ?",
-				)
-				.get(typedItem.id, currentUser.id) as { count: number };
-			return {
-				...typedItem,
-				tags,
-				highlight_count: highlightCount?.count || 0,
-			};
+		const items = db.query(query).all(...params) as ItemListRow[];
+		const itemsWithTags = items.map(({ tags_json, ...item }) => {
+			let tags: string[] = [];
+			try {
+				tags = JSON.parse(tags_json) as string[];
+			} catch {}
+			return { ...item, tags };
 		});
 
 		return c.json(itemsWithTags);
