@@ -196,18 +196,21 @@ function escapeReaderHtml(value) {
 }
 
 export function buildParsedArticleDocument(data) {
-	const isDark = document.documentElement.classList.contains("dark");
+	const theme = getArticleReaderTheme();
+	const {
+		isDark,
+		background,
+		text,
+		muted,
+		accent,
+		rule,
+		quote,
+		highlight,
+	} = theme;
 	const fontSize = getReaderFontSize();
 	const title = escapeReaderHtml(data.title || "");
 	const byline = escapeReaderHtml(data.byline || "");
-	const excerpt = escapeReaderHtml(data.excerpt || "");
 	const content = data.content || "";
-	const background = isDark ? "#101419" : "#f7f1e6";
-	const text = isDark ? "#f2ede3" : "#231a14";
-	const muted = isDark ? "#bcae97" : "#7b6553";
-	const accent = isDark ? "#ffba5c" : "#c46d23";
-	const rule = isDark ? "rgba(255,255,255,0.08)" : "rgba(35,26,20,0.1)";
-	const quote = isDark ? "rgba(255,186,92,0.16)" : "rgba(196,109,35,0.09)";
 
 	return `<!DOCTYPE html>
 <html lang="en" data-reader-kind="parsed-article">
@@ -216,13 +219,12 @@ export function buildParsedArticleDocument(data) {
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>${title || "Article"}</title>
     <style>
-      :root{color-scheme:${isDark ? "dark" : "light"};--rl-reader-bg:${background};--rl-reader-text:${text};--rl-reader-muted:${muted};--rl-reader-accent:${accent};--rl-reader-rule:${rule};--rl-reader-quote:${quote};--rl-reader-font-size:${fontSize}px}
+      :root{color-scheme:${isDark ? "dark" : "light"};--rl-reader-bg:${background};--rl-reader-text:${text};--rl-reader-muted:${muted};--rl-reader-accent:${accent};--rl-reader-rule:${rule};--rl-reader-quote:${quote};--rl-reader-highlight:${highlight};--rl-reader-font-size:${fontSize}px}
       html{scroll-behavior:smooth;background:var(--rl-reader-bg)}
       body{margin:0 auto;padding:max(96px, calc(64px + env(safe-area-inset-top))) max(20px, env(safe-area-inset-right)) max(120px, calc(80px + env(safe-area-inset-bottom))) max(20px, env(safe-area-inset-left));max-width:44rem;background:var(--rl-reader-bg);color:var(--rl-reader-text);font-family:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;font-size:var(--rl-reader-font-size,20px);line-height:1.78;letter-spacing:.01em;-webkit-text-size-adjust:100%;text-size-adjust:100%}
       .rl-reader-header{margin:0 0 2.6rem;padding-bottom:1.4rem;border-bottom:1px solid var(--rl-reader-rule)}
       .rl-reader-header h1{margin:0 0 .7rem;font-size:clamp(2rem,4vw,3.2rem);line-height:1.03;letter-spacing:-.02em}
-      .rl-byline,.rl-excerpt{margin:.35rem 0 0;color:var(--rl-reader-muted)}
-      .rl-excerpt{font-size:.98em}
+      .rl-byline{margin:.35rem 0 0;color:var(--rl-reader-muted)}
       img,video,iframe{max-width:100%;height:auto;border-radius:18px}
       figure{margin-inline:0}
       pre,code{white-space:pre-wrap;word-break:break-word}
@@ -230,15 +232,15 @@ export function buildParsedArticleDocument(data) {
       blockquote{margin-inline:0;padding:.2rem 1rem;border-left:3px solid var(--rl-reader-accent);background:var(--rl-reader-quote);border-radius:0 14px 14px 0}
       table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}
       hr{border:0;border-top:1px solid var(--rl-reader-rule);margin:2rem 0}
-      span.reader-highlight{background:rgba(255,190,92,.35);border-radius:.25em;padding:.04em .02em}
+      span.reader-highlight{background:var(--rl-reader-highlight);border-radius:.25em;padding:.04em .02em}
     </style>
     <script>
-      window.__readingListSetTheme=function(theme){if(!theme)return;const root=document.documentElement;root.style.colorScheme=theme.isDark?"dark":"light";root.style.setProperty("--rl-reader-bg",theme.background);root.style.setProperty("--rl-reader-text",theme.text);root.style.setProperty("--rl-reader-muted",theme.muted);root.style.setProperty("--rl-reader-accent",theme.accent);root.style.setProperty("--rl-reader-rule",theme.rule);root.style.setProperty("--rl-reader-quote",theme.quote)}
+      window.__readingListSetTheme=function(theme){if(!theme)return;const root=document.documentElement;root.style.colorScheme=theme.isDark?"dark":"light";root.style.setProperty("--rl-reader-bg",theme.background);root.style.setProperty("--rl-reader-text",theme.text);root.style.setProperty("--rl-reader-muted",theme.muted);root.style.setProperty("--rl-reader-accent",theme.accent);root.style.setProperty("--rl-reader-rule",theme.rule);root.style.setProperty("--rl-reader-quote",theme.quote);root.style.setProperty("--rl-reader-highlight",theme.highlight)}
       window.__readingListSetFontSize=function(size){if(!size)return;document.documentElement.style.setProperty("--rl-reader-font-size",size+"px")}
     </script>
   </head>
   <body>
-    <header class="rl-reader-header"><h1>${title}</h1>${byline ? `<p class="rl-byline">${byline}</p>` : ""}${excerpt ? `<p class="rl-excerpt">${excerpt}</p>` : ""}</header>
+    <header class="rl-reader-header"><h1>${title}</h1>${byline ? `<p class="rl-byline">${byline}</p>` : ""}</header>
     ${content}
   </body>
 </html>`;
@@ -309,12 +311,15 @@ function getArticleReaderTheme() {
 
 	return {
 		isDark,
-		background: isDark ? "#101419" : "#f7f1e6",
-		text: isDark ? "#f2ede3" : "#231a14",
-		muted: isDark ? "#bcae97" : "#7b6553",
-		accent: isDark ? "#ffba5c" : "#c46d23",
-		rule: isDark ? "rgba(255,255,255,0.08)" : "rgba(35,26,20,0.1)",
-		quote: isDark ? "rgba(255,186,92,0.16)" : "rgba(196,109,35,0.09)",
+		background: isDark ? "#111111" : "#eef1f4",
+		text: isDark ? "#f3f4f6" : "#1a1a1a",
+		muted: isDark ? "#9ca3af" : "#6b7280",
+		accent: isDark ? "#60a5fa" : "#2563eb",
+		rule: isDark ? "#2d2d2d" : "#d8dde3",
+		quote: isDark ? "rgba(59,130,246,0.14)" : "rgba(59,130,246,0.08)",
+		highlight: isDark
+			? "rgba(96,165,250,0.3)"
+			: "rgba(59,130,246,0.22)",
 	};
 }
 
@@ -338,6 +343,10 @@ export function syncOpenArticleTheme() {
 		doc.documentElement.style.setProperty("--rl-reader-accent", theme.accent);
 		doc.documentElement.style.setProperty("--rl-reader-rule", theme.rule);
 		doc.documentElement.style.setProperty("--rl-reader-quote", theme.quote);
+		doc.documentElement.style.setProperty(
+			"--rl-reader-highlight",
+			theme.highlight,
+		);
 	}
 
 	const fontSize = getReaderFontSize();

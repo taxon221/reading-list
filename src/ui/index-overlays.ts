@@ -9,9 +9,9 @@ export function renderIndexOverlays() {
 
     <div class="note-modal-overlay" id="note-modal" style="display: none">
       <div class="note-modal">
-        <div class="note-modal-header"><h3>Add Note</h3><button type="button" class="modal-close" id="note-modal-close">×</button></div>
+        <div class="note-modal-header"><h3 id="note-modal-title">Add Note</h3><button type="button" class="modal-close" id="note-modal-close">×</button></div>
         <div class="note-modal-quote" id="note-modal-quote"></div>
-        <textarea id="note-modal-text" placeholder="Add your thoughts (optional)..." rows="3"></textarea>
+        <textarea id="note-modal-text" placeholder="Add a note" rows="3"></textarea>
         <div class="note-modal-actions"><button type="button" class="btn-secondary" id="note-modal-cancel">Cancel</button><button type="button" class="btn-primary" id="note-modal-save">Save Highlight</button></div>
       </div>
     </div>

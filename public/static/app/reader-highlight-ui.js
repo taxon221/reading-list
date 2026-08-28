@@ -40,8 +40,8 @@ function truncateText(value, maxLength = 150) {
 
 function createSidebarHighlight(highlight) {
 	return createNode(`
-    <div class="sidebar-highlight" data-id="${highlight.id}">
-      <div class="sidebar-highlight-quote" data-action="scroll-highlight" data-id="${highlight.id}">${escapeHtml(truncateText(highlight.selected_text))}</div>
+    <div class="sidebar-highlight" data-action="edit-highlight" data-id="${highlight.id}">
+      <div class="sidebar-highlight-quote">${escapeHtml(truncateText(highlight.selected_text))}</div>
       ${highlight.note ? `<div class="sidebar-highlight-note">${escapeHtml(highlight.note)}</div>` : ""}
       <div class="sidebar-highlight-actions">
         <button type="button" class="sidebar-highlight-btn" data-action="edit-highlight" data-id="${highlight.id}">Edit</button>
@@ -90,6 +90,7 @@ function highlightTextInDocument(doc, text, highlightId = null) {
 		}))
 		.reverse();
 
+	const highlightParts = [];
 	for (const { node: textNode, start, end } of segments) {
 		if (start >= end) continue;
 		try {
@@ -99,9 +100,16 @@ function highlightTextInDocument(doc, text, highlightId = null) {
 			const span = doc.createElement("span");
 			span.className = "reading-list-highlight";
 			if (highlightId !== null) span.dataset.highlightId = String(highlightId);
+			if (textNode.parentElement?.closest("a")) {
+				span.title = "Open note · Cmd/Ctrl-click to open link";
+			}
 			range.surroundContents(span);
+			highlightParts.push(span);
 		} catch {}
 	}
+
+	highlightParts.at(-1)?.classList.add("reading-list-highlight-start");
+	highlightParts[0]?.classList.add("reading-list-highlight-end");
 }
 
 function createHighlightCard(highlight) {
@@ -156,17 +164,21 @@ export function createReaderHighlightUi(readerApi) {
 			style.id = "reading-list-highlight-style";
 			style.textContent = `
         .reading-list-highlight {
-          background-color: rgba(196, 109, 35, 0.32);
-          background-color: color-mix(in srgb, var(--rl-reader-accent, #c46d23) 38%, transparent);
-          border-radius: 0.2em;
-          padding: 0.06em 0.12em;
-          margin: 0 -0.06em;
-          box-decoration-break: clone;
-          -webkit-box-decoration-break: clone;
+          background-color: rgba(59, 130, 246, 0.32);
+          background-color: color-mix(in srgb, var(--rl-reader-accent, #3b82f6) 38%, transparent);
+          cursor: pointer;
         }
-        .reading-list-highlight:hover {
-          background-color: rgba(196, 109, 35, 0.45);
-          background-color: color-mix(in srgb, var(--rl-reader-accent, #c46d23) 52%, transparent);
+        .reading-list-highlight-start {
+          border-top-left-radius: 0.2em;
+          border-bottom-left-radius: 0.2em;
+          padding-left: 0.08em;
+          margin-left: -0.04em;
+        }
+        .reading-list-highlight-end {
+          border-top-right-radius: 0.2em;
+          border-bottom-right-radius: 0.2em;
+          padding-right: 0.08em;
+          margin-right: -0.04em;
         }
       `;
 			doc.head.appendChild(style);
@@ -234,7 +246,7 @@ export function createReaderHighlightUi(readerApi) {
 			.querySelectorAll(`[data-highlight-id="${highlightId}"]`)
 			.forEach((entry) => {
 				entry.style.backgroundColor =
-					"color-mix(in srgb, var(--rl-reader-accent, #c46d23) 58%, transparent)";
+					"color-mix(in srgb, var(--rl-reader-accent, #3b82f6) 58%, transparent)";
 				setTimeout(() => {
 					entry.style.backgroundColor = "";
 				}, 1000);
@@ -264,7 +276,6 @@ export function createReaderHighlightUi(readerApi) {
 		dom.selectionPopup.style.left = "";
 		dom.selectionPopup.style.top = "";
 		dom.selectionPopup.style.display = "none";
-		state.pendingSelectionText = "";
 	}
 
 	function stopMobileSelectionPoll() {
@@ -414,6 +425,22 @@ export function createReaderHighlightUi(readerApi) {
 		doc.addEventListener("pointerdown", () => {
 			setTimeout(handleIframeSelection, 50);
 		});
+		doc.addEventListener("click", (event) => {
+			const element = event.target.closest?.(".reading-list-highlight");
+			const highlightId = Number(element?.dataset.highlightId);
+			const highlight = state.currentHighlights.find(
+				(item) => item.id === highlightId,
+			);
+			if (!highlight) return;
+			if (element.closest("a") && (event.metaKey || event.ctrlKey)) return;
+
+			event.preventDefault();
+			openNoteModal(
+				highlight.selected_text,
+				highlight.note || "",
+				highlightId,
+			);
+		});
 		doc.addEventListener("keydown", (event) => {
 			if (shouldIgnoreKeyboardShortcut(event)) return;
 			const key = event.key.toLowerCase();
@@ -430,11 +457,21 @@ export function createReaderHighlightUi(readerApi) {
 		startMobileSelectionPoll();
 	}
 
-	function openNoteModal(selectedText) {
+	function openNoteModal(selectedText, note = "", highlightId = null) {
 		if (!dom.noteModal || !dom.noteModalQuote || !dom.noteModalText) return;
 
+		state.pendingSelectionText = selectedText;
+		state.editingHighlightId = highlightId;
 		dom.noteModalQuote.textContent = selectedText;
-		dom.noteModalText.value = "";
+		dom.noteModalText.value = note;
+		if (dom.noteModalTitle) {
+			dom.noteModalTitle.textContent = highlightId ? "Edit Note" : "Add Note";
+		}
+		if (dom.noteModalSave) {
+			dom.noteModalSave.textContent = highlightId
+				? "Save Note"
+				: "Save Highlight";
+		}
 		dom.noteModal.style.display = "flex";
 		if (!isMobileViewport()) {
 			dom.noteModalText.focus();
@@ -447,6 +484,8 @@ export function createReaderHighlightUi(readerApi) {
 		dom.noteModal.style.display = "none";
 		dom.noteModalQuote.textContent = "";
 		dom.noteModalText.value = "";
+		state.pendingSelectionText = "";
+		state.editingHighlightId = null;
 	}
 
 	function renderAllHighlights(highlights) {

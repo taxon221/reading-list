@@ -45,16 +45,6 @@ export function initReaderHighlights(app, readerApi) {
 		highlightUi.renderAllHighlights(state.allHighlights);
 	}
 
-	async function updateHighlightNote(highlightId, note) {
-		const response = await fetch(`/api/highlights/${highlightId}`, {
-			method: "PATCH",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ note }),
-		}).catch(() => null);
-		if (response && handleAuthFailure(response)) return false;
-		return Boolean(response?.ok);
-	}
-
 	async function deleteHighlight(highlightId) {
 		const response = await fetch(`/api/highlights/${highlightId}`, {
 			method: "DELETE",
@@ -70,30 +60,26 @@ export function initReaderHighlights(app, readerApi) {
 		const highlightId = Number(actionEl.dataset.id);
 		if (!highlightId) return;
 
-		if (actionEl.dataset.action === "scroll-highlight") {
-			highlightUi.scrollToHighlight(highlightId);
-			return;
-		}
-
 		const highlight = state.currentHighlights.find(
 			(item) => item.id === highlightId,
 		);
 		if (!highlight) return;
 
 		if (actionEl.dataset.action === "edit-highlight") {
-			const newNote = prompt("Edit note:", highlight.note || "");
-			if (newNote === null) return;
-			if (await updateHighlightNote(highlightId, newNote)) {
-				loadHighlights(state.currentReaderId);
-				loadAllHighlights();
-			}
+			highlightUi.scrollToHighlight(highlightId);
+			highlightUi.openNoteModal(
+				highlight.selected_text,
+				highlight.note || "",
+				highlightId,
+			);
 			return;
 		}
 
 		if (actionEl.dataset.action === "delete-highlight") {
 			if (!confirm("Delete this highlight?")) return;
 			if (await deleteHighlight(highlightId)) {
-				loadHighlights(state.currentReaderId);
+				await loadHighlights(state.currentReaderId);
+				highlightUi.scheduleApplyHighlightsToDocument();
 				loadAllHighlights();
 			}
 		}
@@ -117,27 +103,42 @@ export function initReaderHighlights(app, readerApi) {
 			showUnauthorizedState(state.authMessage);
 			return;
 		}
-		if (!state.currentReaderId || !state.pendingSelectionText) return;
+		const editingHighlightId = state.editingHighlightId;
+		if (
+			!editingHighlightId &&
+			(!state.currentReaderId || !state.pendingSelectionText)
+		)
+			return;
 
 		const response = await fetch(
-			`/api/items/${state.currentReaderId}/highlights`,
+			editingHighlightId
+				? `/api/highlights/${editingHighlightId}`
+				: `/api/items/${state.currentReaderId}/highlights`,
 			{
-				method: "POST",
+				method: editingHighlightId ? "PATCH" : "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					selected_text: state.pendingSelectionText,
-					note: dom.noteModalText?.value.trim() || "",
-				}),
+				body: JSON.stringify(
+					editingHighlightId
+						? { note: dom.noteModalText?.value.trim() || "" }
+						: {
+								selected_text: state.pendingSelectionText,
+								note: dom.noteModalText?.value.trim() || "",
+							},
+				),
 			},
 		).catch(() => null);
 		if (response && handleAuthFailure(response)) return;
 		if (!response?.ok) return;
 
 		highlightUi.closeNoteModal();
-		highlightUi.clearIframeSelection();
-		highlightUi.hideSelectionPopup();
-		await loadHighlights(state.currentReaderId);
-		highlightUi.scheduleApplyHighlightsToDocument();
+		if (!editingHighlightId) {
+			highlightUi.clearIframeSelection();
+			highlightUi.hideSelectionPopup();
+		}
+		if (state.currentReaderId) {
+			await loadHighlights(state.currentReaderId);
+			highlightUi.scheduleApplyHighlightsToDocument();
+		}
 		if (dom.notesView?.style.display !== "none") {
 			loadAllHighlights();
 		}
@@ -178,14 +179,11 @@ export function initReaderHighlights(app, readerApi) {
 		if (!highlight) return;
 
 		if (actionEl.dataset.action === "edit-highlight-list") {
-			const newNote = prompt("Edit note:", highlight.note || "");
-			if (newNote === null) return;
-			if (await updateHighlightNote(highlightId, newNote)) {
-				if (state.currentReaderId === highlight.item_id) {
-					loadHighlights(highlight.item_id);
-				}
-				loadAllHighlights();
-			}
+			highlightUi.openNoteModal(
+				highlight.selected_text,
+				highlight.note || "",
+				highlightId,
+			);
 			return;
 		}
 
@@ -193,7 +191,7 @@ export function initReaderHighlights(app, readerApi) {
 			if (!confirm("Delete this highlight?")) return;
 			if (await deleteHighlight(highlightId)) {
 				if (state.currentReaderId === highlight.item_id) {
-					loadHighlights(highlight.item_id);
+					await loadHighlights(highlight.item_id);
 					highlightUi.scheduleApplyHighlightsToDocument();
 				}
 				loadAllHighlights();
