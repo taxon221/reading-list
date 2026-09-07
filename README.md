@@ -13,6 +13,10 @@ A minimal, self-hosted reading list manager. Save articles, videos, PDFs, and po
 - Clean, minimal interface
 - Single binary deployment with Bun
 
+## iOS app
+
+The native iOS client, IPA releases, and AltStore/SideStore source now live in [reading-list-ios](https://github.com/taxon221/reading-list-ios).
+
 ## Requirements
 
 - Docker Compose

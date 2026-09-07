@@ -1,13 +1,51 @@
 import {
 	createEpubShell,
+	getArticleReaderTheme,
 	getReaderSourceUrl,
 	getSafeReaderFetchUrl,
 	resetEpubReader,
 	revokeReaderBlobUrl,
 	showReaderError,
 } from "./reader-display.js";
+import { getReaderFontSize } from "./reader-font.js";
 import { dom, state } from "./shared.js";
 import { clampProgressRatio, isMobileViewport, withTimeout } from "./utils.js";
+
+const EPUB_BODY_FONT =
+	'"Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif';
+
+/** Keeps the book on the same theme and font size as the article reader. */
+export function syncEpubReaderTheme() {
+	const rendition = state.currentEpubRendition;
+	if (!rendition) return;
+
+	const theme = getArticleReaderTheme();
+	const page = document.getElementById("ebook-page");
+	if (page) page.style.background = theme.background;
+
+	rendition.themes.default({
+		body: {
+			"font-family": EPUB_BODY_FONT,
+			"line-height": "1.7",
+			"-webkit-text-size-adjust": "100%",
+		},
+		a: { color: theme.accent },
+		"img, svg, video": { "max-width": "100%" },
+	});
+	rendition.themes.override("color", theme.text);
+	rendition.themes.override("background", theme.background);
+	rendition.themes.fontSize(`${getReaderFontSize()}px`);
+}
+
+/** Turns the open EPUB page for ArrowLeft/ArrowRight. Returns true when the key was consumed. */
+export function handleEpubPageKey(event) {
+	const rendition = state.currentEpubRendition;
+	if (!rendition) return false;
+	if (event.key === "ArrowRight") rendition.next();
+	else if (event.key === "ArrowLeft") rendition.prev();
+	else return false;
+	return true;
+}
 
 export async function openEpubReader(itemUrl, readerApi) {
 	const epubFactory = window.ePub;
@@ -33,7 +71,8 @@ export async function openEpubReader(itemUrl, readerApi) {
 	revokeReaderBlobUrl();
 	const shell = createEpubShell();
 	dom.readerContent.replaceChildren(shell.wrapper);
-	const { stage, locationEl, prevBtn, nextBtn, prevZone, nextZone } = shell;
+	const { stage, prevBtn, nextBtn, prevZone, nextZone } = shell;
+	shell.page.style.background = getArticleReaderTheme().background;
 
 	const attachSelectionToCurrentChapter = () => {
 		const iframe = stage.querySelector("iframe");
@@ -85,7 +124,6 @@ export async function openEpubReader(itemUrl, readerApi) {
 		if (typeof directPercentage === "number") {
 			const ratio = clampProgressRatio(directPercentage);
 			const label = `${Math.round(ratio * 100)}%`;
-			locationEl.textContent = label;
 			return {
 				payload: { kind: "epub", cfi, percentage: ratio },
 				ratio,
@@ -102,7 +140,6 @@ export async function openEpubReader(itemUrl, readerApi) {
 		) {
 			const ratio = clampProgressRatio(displayed.page / displayed.total);
 			const label = `${displayed.page}/${displayed.total}`;
-			locationEl.textContent = label;
 			return {
 				payload: {
 					kind: "epub",
@@ -121,7 +158,6 @@ export async function openEpubReader(itemUrl, readerApi) {
 				if (typeof percentage === "number" && !Number.isNaN(percentage)) {
 					const ratio = clampProgressRatio(percentage);
 					const label = `${Math.round(ratio * 100)}%`;
-					locationEl.textContent = label;
 					return {
 						payload: { kind: "epub", cfi, percentage: ratio },
 						ratio,
@@ -131,7 +167,6 @@ export async function openEpubReader(itemUrl, readerApi) {
 			} catch {}
 		}
 
-		locationEl.textContent = "";
 		return {
 			payload: cfi ? { kind: "epub", cfi } : { kind: "epub" },
 			ratio: 0,
@@ -177,9 +212,14 @@ export async function openEpubReader(itemUrl, readerApi) {
 
 		state.currentEpubBook = book;
 		state.currentEpubRendition = rendition;
+		syncEpubReaderTheme();
 
 		prevBtn.addEventListener("click", () => rendition.prev());
 		nextBtn.addEventListener("click", () => rendition.next());
+		// Focus usually sits inside the chapter iframe after a click; epub.js forwards its keydowns here.
+		rendition.on("keydown", (event) => {
+			if (handleEpubPageKey(event)) readerApi.hideSelectionPopup?.();
+		});
 		setupMobileDoubleTapZones(rendition);
 
 		rendition.on("rendered", () => {

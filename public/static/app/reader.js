@@ -16,7 +16,11 @@ import {
 	toggleReaderSidebar,
 	unlockBackgroundScroll,
 } from "./reader-display.js";
-import { openEpubReader } from "./reader-epub.js";
+import {
+	handleEpubPageKey,
+	openEpubReader,
+	syncEpubReaderTheme,
+} from "./reader-epub.js";
 import { initReaderHighlights } from "./reader-highlights.js";
 import { initReaderProgress } from "./reader-progress.js";
 import { dom, handleAuthFailure, state } from "./shared.js";
@@ -276,6 +280,11 @@ export function initReader(app) {
 			dom.readerModal && dom.readerModal.style.display !== "none";
 
 		if (readerOpen && !shouldIgnoreKeyboardShortcut(event)) {
+			if (handleEpubPageKey(event)) {
+				event.preventDefault();
+				readerApi.hideSelectionPopup?.();
+				return;
+			}
 			const key = event.key.toLowerCase();
 			if (key === "o") {
 				event.preventDefault();
@@ -311,6 +320,10 @@ export function initReader(app) {
 	document.addEventListener("readinglist:themechange", () => {
 		syncOpenArticleTheme();
 		syncPdfReaderTheme();
+		syncEpubReaderTheme();
 	});
-	document.addEventListener("readinglist:fontsizechange", syncOpenArticleTheme);
+	document.addEventListener("readinglist:fontsizechange", () => {
+		syncOpenArticleTheme();
+		syncEpubReaderTheme();
+	});
 }

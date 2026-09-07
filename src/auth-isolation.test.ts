@@ -144,6 +144,18 @@ afterAll(() => {
 });
 
 describe("auth and user isolation", () => {
+	test("preserves notes when creating an item from the iOS editor or share sheet", async () => {
+		const response = await api("/api/items", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ url: "https://example.com/notes", title: "Notes", notes: "Keep this note" }),
+		}, bootstrapAdminEmail);
+		expect(response.status).toBe(201);
+		const { id } = await response.json() as { id: number };
+		const item = await apiJson<{ notes: string }>(`/api/items/${id}`, {}, bootstrapAdminEmail);
+		expect(item.notes).toBe("Keep this note");
+	});
+
 	test("rejects missing identities while auto-provisioning users and the bootstrap admin", async () => {
 		const missingIdentity = await api("/api/items");
 		expect(missingIdentity.status).toBe(401);

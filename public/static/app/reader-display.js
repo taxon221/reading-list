@@ -161,24 +161,23 @@ export function createVideoIframe(src, allow = "") {
 }
 
 export function createEpubShell() {
+	const chevron = (direction) =>
+		`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="${direction === "left" ? "15 18 9 12 15 6" : "9 18 15 12 9 6"}"></polyline></svg>`;
 	const wrapper = createReaderNode(`
     <div class="ebook-reader">
-      <div class="ebook-toolbar">
-        <button type="button" class="ebook-nav-btn" id="ebook-prev">Prev</button>
-        <span class="ebook-location" id="ebook-location">Loading...</span>
-        <button type="button" class="ebook-nav-btn" id="ebook-next">Next</button>
-      </div>
-      <div class="ebook-stage">
+      <button type="button" class="ebook-nav ebook-nav-prev" id="ebook-prev" aria-label="Previous page" title="Previous page (←)">${chevron("left")}</button>
+      <div class="ebook-page" id="ebook-page">
         <div class="ebook-stage-frame" id="ebook-stage"></div>
-        <button type="button" class="ebook-tap-zone left" id="ebook-zone-prev" aria-label="Previous page"></button>
-        <button type="button" class="ebook-tap-zone right" id="ebook-zone-next" aria-label="Next page"></button>
       </div>
+      <button type="button" class="ebook-nav ebook-nav-next" id="ebook-next" aria-label="Next page" title="Next page (→)">${chevron("right")}</button>
+      <button type="button" class="ebook-tap-zone left" id="ebook-zone-prev" aria-label="Previous page"></button>
+      <button type="button" class="ebook-tap-zone right" id="ebook-zone-next" aria-label="Next page"></button>
     </div>`);
 
 	return {
 		wrapper,
+		page: wrapper.querySelector("#ebook-page"),
 		stage: wrapper.querySelector("#ebook-stage"),
-		locationEl: wrapper.querySelector("#ebook-location"),
 		prevBtn: wrapper.querySelector("#ebook-prev"),
 		nextBtn: wrapper.querySelector("#ebook-next"),
 		prevZone: wrapper.querySelector("#ebook-zone-prev"),
@@ -306,7 +305,7 @@ export function getSafeReaderFetchUrl(url, allowedPathPrefixes) {
 	return parsedUrl.toString();
 }
 
-function getArticleReaderTheme() {
+export function getArticleReaderTheme() {
 	const isDark = document.documentElement.classList.contains("dark");
 
 	return {

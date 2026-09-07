@@ -207,6 +207,7 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			author,
 			type,
 			tags,
+			notes,
 			preview_image,
 			reading_time_minutes,
 		} =
@@ -223,7 +224,7 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 
 		const result = db
 			.query(
-				"INSERT INTO items (user_id, url, title, author, type, preview_image, reading_time_minutes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				"INSERT INTO items (user_id, url, title, author, type, notes, preview_image, reading_time_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			)
 			.run(
 				currentUser.id,
@@ -231,6 +232,7 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 				title || "",
 				author || "",
 				type || "article",
+				typeof notes === "string" ? notes : "",
 				previewImage,
 				readingTimeMinutes,
 			);
