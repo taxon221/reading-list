@@ -4,25 +4,35 @@
 	"description": "Personal reading list manager",
 	"type": "module",
 	"scripts": {
-		"dev": "bun run --watch src/index.ts",
-		"start": "bun run src/index.ts",
+		"dev": "bun run vendor && bun run --watch src/index.ts",
+		"start": "bun run vendor && bun run src/index.ts",
 		"rss:import": "bun run src/import-rss.ts",
 		"backfill:preview-images": "bun run src/backfill-preview-images.ts",
 		"backfill:reading-times": "bun run src/backfill-reading-times.ts",
-		"lint": "biome lint src public/static/app",
-		"typecheck": "tsc --noEmit --target esnext --module esnext --moduleResolution bundler --skipLibCheck src/access.ts src/index.ts src/db.ts src/auth-isolation.test.ts src/import-rss.ts src/server/register-rss-routes.ts src/server/rss-import.ts",
+		"lint": "biome lint src scripts public/static/app public/static/app.js public/static/pdf-reader.js",
+		"typecheck": "tsc -p tsconfig.json",
 		"test": "bun test",
-		"check": "bun run lint && bun run typecheck && bun run test"
+		"check": "bun run lint && bun run typecheck && bun run test",
+		"vendor": "bun run scripts/vendor.ts",
+		"auth:setup": "bun run src/auth-setup.ts",
+		"backup": "bun run src/backup.ts"
 	},
 	"dependencies": {
 		"@mozilla/readability": "^0.6.0",
+		"@simplewebauthn/browser": "14.0.0",
+		"@simplewebauthn/server": "14.0.3",
+		"dompurify": "3.4.17",
+		"epubjs": "0.3.93",
 		"hono": "^4.4.0",
 		"jose": "^6.2.1",
-		"jsdom": "^28.1.0"
+		"jsdom": "^28.1.0",
+		"jszip": "3.10.2",
+		"pdfjs-dist": "6.4.299"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.7",
 		"@types/bun": "latest",
+		"fake-indexeddb": "6.2.7",
 		"typescript": "^5.9.3"
 	}
 }

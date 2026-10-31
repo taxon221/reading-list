@@ -7,6 +7,7 @@
             content="width=device-width, initial-scale=1.0, viewport-fit=cover"
         />
         <title>PDF Reader</title>
+<link rel="stylesheet" href="/static/vendor/pdf_viewer.css" />
         <style>
             :root {
                 color-scheme: light;
@@ -97,7 +98,6 @@
         <div id="status">Loading PDF...</div>
         <div id="pdf-container"></div>
 
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-        <script src="/static/pdf-reader.js"></script>
+        <script type="module" src="/static/pdf-reader.js"></script>
     </body>
 </html>

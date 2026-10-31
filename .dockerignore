@@ -1,4 +1,8 @@
 node_modules
+data
+backups
+ios_composer
+public/static/vendor
 *.db
 *.db-journal
 *.db-wal
