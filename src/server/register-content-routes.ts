@@ -6,6 +6,7 @@ import {
 	getFallbackTitle,
 	parseTitle,
 	readResponseText,
+	readBoundedBytes,
 	serializeDocumentHtml,
 	withRemoteResponse,
 } from "./content-utils";
@@ -28,7 +29,8 @@ function createArticleOpenError(
 		return {
 			error: "Failed to fetch content",
 			reason,
-			message: "This article took too long to load. Open the original page to continue.",
+			message:
+				"This article took too long to load. Open the original page to continue.",
 		};
 	}
 
@@ -161,16 +163,21 @@ export function registerContentRoutes(app: Hono<AppBindings>) {
 							!new URL(finalUrl).pathname.toLowerCase().endsWith(extension)
 						) {
 							return c.json(
-								{ error: `URL did not return a ${documentType.label} document` },
+								{
+									error: `URL did not return a ${documentType.label} document`,
+								},
 								400,
 							);
 						}
-						return new Response(await response.arrayBuffer(), {
-							headers: {
-								"Content-Type": documentType.contentType,
-								"Cache-Control": "no-store",
+						return new Response(
+							await readBoundedBytes(response, 100 * 1024 * 1024),
+							{
+								headers: {
+									"Content-Type": documentType.contentType,
+									"Cache-Control": "no-store",
+								},
 							},
-						});
+						);
 					},
 				);
 				return result || c.json({ error: "URL is not allowed" }, 400);

@@ -371,6 +371,12 @@ export async function importUploadFileForUser(
 	let storedUrl = "";
 	let storedFilename = "";
 	try {
+		if (file.size > 100 * 1024 * 1024)
+			return {
+				ok: false,
+				name: file.name,
+				reason: "Files must be under 100 MB.",
+			};
 		const extension = getUploadFileExtension(file.name);
 		if (!allowedUploadExtensions.has(extension)) {
 			return {

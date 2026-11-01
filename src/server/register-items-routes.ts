@@ -1,3 +1,9 @@
+import {
+	canonicalItemUrl,
+	enrichSavedItem,
+	findDuplicateItem,
+	savedType,
+} from "./article-store";
 import type { Hono } from "hono";
 import { db } from "../db";
 import { getCurrentUser } from "./auth";
@@ -39,8 +45,8 @@ function shouldAutoMarkRead(progress: unknown) {
 			: typeof value.percentage === "number"
 				? value.percentage
 				: typeof value.page === "number" &&
-					  typeof value.total === "number" &&
-					  value.total > 0
+						typeof value.total === "number" &&
+						value.total > 0
 					? value.page / value.total
 					: 0;
 
@@ -202,7 +208,7 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 	app.post("/api/items", async (c) => {
 		const currentUser = getCurrentUser(c);
 		const {
-			url,
+			url: rawUrl,
 			title,
 			author,
 			type,
@@ -210,13 +216,14 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			notes,
 			preview_image,
 			reading_time_minutes,
-		} =
-			await c.req.json();
+		} = await c.req.json();
 
-		if (!url) return c.json({ error: "URL is required" }, 400);
-		if (String(url).startsWith("/uploads/")) {
-			return c.json({ error: "Use the upload endpoint for local files" }, 400);
-		}
+		const url = canonicalItemUrl(rawUrl);
+		if (!url)
+			return c.json({ error: "Enter a public HTTP or HTTPS URL." }, 400);
+		const duplicate = findDuplicateItem(currentUser.id, url);
+		if (duplicate)
+			return c.json({ id: duplicate.id, success: true, duplicate: true }, 200);
 		const previewImage = normalizeStoredPreviewImage(preview_image);
 		const readingTimeMinutes = Number.isInteger(reading_time_minutes)
 			? Number(reading_time_minutes)
@@ -231,13 +238,18 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 				url,
 				title || "",
 				author || "",
-				type || "article",
+				savedType(url, type),
 				typeof notes === "string" ? notes : "",
 				previewImage,
 				readingTimeMinutes,
 			);
 
 		attachTagsToItem(result.lastInsertRowid, currentUser.id, tags);
+		if (Bun.env.ARTICLE_CAPTURE_ON_SAVE !== "false")
+			void enrichSavedItem(
+				currentUser.id,
+				Number(result.lastInsertRowid),
+			).catch(() => undefined);
 		return c.json({ id: result.lastInsertRowid, success: true }, 201);
 	});
 
@@ -354,14 +366,20 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		if (!existingItem) return c.json({ error: "Item not found" }, 404);
 		if (!url) return c.json({ error: "URL is required" }, 400);
 
+		if (!String(url).startsWith("/uploads/") && !canonicalItemUrl(url))
+			return c.json({ error: "Enter an HTTP or HTTPS URL." }, 400);
 		const upload = getOwnedUploadMapping(id, currentUser.id);
 		if (
 			String(url).startsWith("/uploads/") &&
-			(!upload || url !== existingItem.url || url !== `/uploads/${upload.filename}`)
+			(!upload ||
+				url !== existingItem.url ||
+				url !== `/uploads/${upload.filename}`)
 		) {
 			return c.json({ error: "Uploaded file URL cannot be changed" }, 400);
 		}
 
+		if (existingItem.url !== url)
+			db.query("DELETE FROM article_snapshots WHERE item_id=?").run(id);
 		const nextAuthor =
 			author !== undefined ? String(author || "") : existingItem.author || "";
 		const nextPreviewImage =

@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { createEnhancementsSchema } from "./server/enhancements-schema";
 import { existsSync, mkdirSync } from "node:fs";
 
 export const dataDir = Bun.env.DATA_DIR || "./data";
@@ -361,6 +362,7 @@ export function initDb() {
 			createRssSubscriptionsTable();
 			createRssSubscriptionSeenTable();
 			createIndexes();
+			createEnhancementsSchema(db);
 		})();
 	} finally {
 		db.exec("PRAGMA foreign_keys = ON");

@@ -1,3 +1,4 @@
+import { registerLibraryRoutes } from "./server/register-library-routes";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { csrf } from "hono/csrf";
@@ -86,6 +87,7 @@ app.use("/api/*", async (c, next) => {
 	await next();
 });
 
+registerLibraryRoutes(app);
 registerContentRoutes(app);
 registerImportRoutes(app);
 registerItemRoutes(app);

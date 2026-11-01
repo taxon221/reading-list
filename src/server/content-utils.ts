@@ -268,10 +268,9 @@ function estimateReadingTimeMinutes(
 	const dom = new JSDOM(html, { url: sourceUrl, virtualConsole });
 	const { document } = dom.window;
 	const article = new Readability(document).parse();
-	const text =
-		String(article?.textContent || document.body?.textContent || "")
-			.replace(/\s+/g, " ")
-			.trim();
+	const text = String(article?.textContent || document.body?.textContent || "")
+		.replace(/\s+/g, " ")
+		.trim();
 	if (!text) return null;
 
 	const wordCount = text.split(" ").filter(Boolean).length;
@@ -438,7 +437,9 @@ function isPrivateIpAddress(address: string): boolean {
 
 type RemoteTarget = { addresses: string[] | null; url: string };
 
-async function getSafeRemoteTarget(rawUrl: string): Promise<RemoteTarget | null> {
+async function getSafeRemoteTarget(
+	rawUrl: string,
+): Promise<RemoteTarget | null> {
 	let parsed: URL;
 	try {
 		parsed = new URL(rawUrl);
@@ -622,4 +623,34 @@ export async function readResponseText(
 
 export function getFallbackTitle(url: string): string {
 	return fallbackTitle(url);
+}
+
+export async function readBoundedBytes(response: Response, limit: number) {
+	if (Number(response.headers.get("content-length")) > limit)
+		throw new Error("File too large");
+	const reader = response.body?.getReader();
+	if (!reader) return new Uint8Array();
+	const chunks: Uint8Array[] = [];
+	let length = 0;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			length += value.byteLength;
+			if (length > limit) {
+				await reader.cancel();
+				throw new Error("File too large");
+			}
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	const result = new Uint8Array(length);
+	let offset = 0;
+	for (const chunk of chunks) {
+		result.set(chunk, offset);
+		offset += chunk.length;
+	}
+	return result;
 }
