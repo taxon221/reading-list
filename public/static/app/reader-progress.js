@@ -37,57 +37,138 @@ function getCurrentItemReadingProgress(itemId) {
 	return parseReadingProgress(item?.reading_progress);
 }
 
-function updateCachedItemProgress(itemId, progress) {
-	const numericId = Number(itemId);
-	const item = state.itemsById.get(numericId);
-	if (!item) return;
+const recentEdits = new Map();
+const savesInFlight = new Map();
+let progressRevision = 0;
+const progressAccount = () => state.authUi.currentUser?.email || "guest";
+const progressKey = (account, itemId) =>
+	`reading-progress:${account}:${itemId}`;
 
-	item.reading_progress = JSON.stringify(progress || {});
-	state.itemsById.set(numericId, item);
+function applyProgress(item, progress) {
+	item.reading_progress = JSON.stringify(progress);
+	const ratio =
+		typeof progress.ratio === "number"
+			? progress.ratio
+			: typeof progress.percentage === "number"
+				? progress.percentage
+				: progress.total > 0
+					? progress.page / progress.total
+					: 0;
+	if (["article", "pdf", "epub"].includes(progress.kind) && ratio >= 0.99)
+		item.is_read = 1;
 }
 
-function persistReaderProgress(itemId, progress) {
-	if (!itemId || !progress || typeof progress !== "object") return;
+function pendingProgress(account) {
+	const pending = new Map();
+	const prefix = `reading-progress:${account}:`;
+	try {
+		for (const key of Object.keys(localStorage)) {
+			if (!key.startsWith(prefix)) continue;
+			try {
+				const progress = JSON.parse(localStorage.getItem(key));
+				if (progress && typeof progress === "object")
+					pending.set(Number(key.slice(prefix.length)), progress);
+			} catch {}
+		}
+	} catch {}
+	return pending;
+}
 
-	void fetch(`/api/items/${itemId}/progress`, {
-		method: "PATCH",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ progress }),
-	}).then((response) => {
-		if (response.ok) updateCachedItemProgress(itemId, progress);
+export function captureProgressSnapshot() {
+	const account = progressAccount();
+	return {
+		account,
+		revision: progressRevision,
+		pending: pendingProgress(account),
+	};
+}
+
+export function mergePendingProgress(items, snapshot) {
+	if (snapshot.account !== progressAccount()) return items;
+	const pending = pendingProgress(snapshot.account);
+	for (const item of items) {
+		const id = Number(item.id);
+		const edit = recentEdits.get(id);
+		const progress =
+			edit?.account === snapshot.account && edit.revision > snapshot.revision
+				? edit.progress
+				: pending.get(id) || snapshot.pending.get(id);
+		if (progress) applyProgress(item, progress);
+	}
+	return items;
+}
+
+function persistReaderProgress(itemId, progress, account = progressAccount()) {
+	if (
+		!itemId ||
+		!progress ||
+		typeof progress !== "object" ||
+		account !== progressAccount()
+	)
+		return;
+	const key = progressKey(account, itemId);
+	const serialized = JSON.stringify(progress);
+	const previous = savesInFlight.get(key);
+	if (previous?.payload === serialized) return previous.promise;
+	const send = async () => {
+		if (account !== progressAccount()) return;
+		try {
+			const response = await fetch(`/api/items/${itemId}/progress`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ progress }),
+				keepalive: true,
+			});
+			if (response.ok && localStorage.getItem(key) === serialized)
+				localStorage.removeItem(key);
+		} catch {}
+	};
+	// Preserve write order for this item, even when the network is slow.
+	const work = previous ? previous.promise.then(send, send) : send();
+	const promise = work.finally(() => {
+		if (savesInFlight.get(key)?.promise === promise) savesInFlight.delete(key);
 	});
+	savesInFlight.set(key, { payload: serialized, promise });
+	return promise;
 }
 
 function queueReaderProgressSave(progress) {
-	if (!state.currentReaderId || !progress || typeof progress !== "object") {
+	if (!state.currentReaderId || !progress || typeof progress !== "object")
 		return;
-	}
-
-	if (state.pendingProgressSave) clearTimeout(state.pendingProgressSave);
-	state.pendingProgressItemId = state.currentReaderId;
+	if (
+		state.pendingProgressSave &&
+		state.pendingProgressItemId !== state.currentReaderId
+	)
+		flushPendingProgressSave();
+	const id = Number(state.currentReaderId);
+	const account = progressAccount();
+	const serialized = JSON.stringify(progress);
+	const item = state.itemsById.get(id);
+	if (item?.reading_progress === serialized) return;
+	recentEdits.set(id, { account, revision: ++progressRevision, progress });
+	if (item) applyProgress(item, progress);
+	try {
+		localStorage.setItem(progressKey(account, id), serialized);
+	} catch {}
+	state.pendingProgressItemId = id;
 	state.pendingProgressPayload = progress;
-	updateCachedItemProgress(state.currentReaderId, progress);
-
-	state.pendingProgressSave = setTimeout(() => {
-		const itemId = state.pendingProgressItemId;
-		const payload = state.pendingProgressPayload;
-		state.pendingProgressSave = null;
-		state.pendingProgressItemId = null;
-		state.pendingProgressPayload = null;
-		persistReaderProgress(itemId, payload);
-	}, 350);
+	state.pendingProgressAccount = account;
+	// Coalesce updates without indefinitely postponing the save while scrolling.
+	if (!state.pendingProgressSave)
+		state.pendingProgressSave = setTimeout(flushPendingProgressSave, 350);
 }
 
 function flushPendingProgressSave() {
 	if (!state.pendingProgressSave) return;
-
 	clearTimeout(state.pendingProgressSave);
 	const itemId = state.pendingProgressItemId;
 	const payload = state.pendingProgressPayload;
+	const account = state.pendingProgressAccount;
 	state.pendingProgressSave = null;
 	state.pendingProgressItemId = null;
 	state.pendingProgressPayload = null;
-	persistReaderProgress(itemId, payload);
+	state.pendingProgressAccount = null;
+	return persistReaderProgress(itemId, payload, account);
 }
 
 function normalizeProgressUrl(value) {
@@ -170,8 +251,28 @@ function getElementRatio(element) {
 }
 
 export function initReaderProgress() {
+	window.addEventListener("reading:account-changed", () => {
+		recentEdits.clear();
+		progressRevision++;
+	});
+	window.addEventListener("pagehide", flushPendingProgressSave);
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") flushPendingProgressSave();
+	});
+	function retryProgress() {
+		const account = progressAccount();
+		for (const [itemId, progress] of pendingProgress(account))
+			void persistReaderProgress(itemId, progress, account);
+	}
+	window.addEventListener("online", retryProgress);
+	window.addEventListener("reading:library-loaded", retryProgress);
 	window.addEventListener("message", (event) => {
-		if (!state.readerIframe) return;
+		if (
+			!state.readerIframe ||
+			event.source !== state.readerIframe.contentWindow ||
+			event.origin !== window.location.origin
+		)
+			return;
 
 		const data = event.data;
 		if (!data || data.type !== "reading-progress") return;
@@ -185,6 +286,11 @@ export function initReaderProgress() {
 
 	function setupArticleProgressTracking(url) {
 		if (!state.currentReaderId || !state.readerIframe) return;
+		const trackedItemId = state.currentReaderId;
+		const trackedIframe = state.readerIframe;
+		const isActive = () =>
+			state.currentReaderId === trackedItemId &&
+			state.readerIframe === trackedIframe;
 
 		const doc = getIframeDocument(state.readerIframe);
 		const win = doc?.defaultView;
@@ -279,6 +385,7 @@ export function initReaderProgress() {
 		};
 
 		const saveRatio = (ratio) => {
+			if (!isActive()) return;
 			const clampedRatio = clampProgressRatio(ratio);
 			if (clampedRatio > 0) hasCapturedPositiveRatio = true;
 
@@ -302,7 +409,7 @@ export function initReaderProgress() {
 			Math.max(getRootRatio(), getContainerRatio(eventTarget));
 
 		const persistRatio = (event) => {
-			if (Date.now() < restoreGuardUntil) return;
+			if (!isActive() || Date.now() < restoreGuardUntil) return;
 
 			const measured = getCurrentRatio(event?.target || null);
 			const ratio =
@@ -313,6 +420,7 @@ export function initReaderProgress() {
 		};
 
 		const restoreProgress = (withGuard = false) => {
+			if (!isActive()) return;
 			const progress = getCurrentItemReadingProgress(state.currentReaderId);
 			const resolved = getLegacyAwareArticleRatio(progress, currentProgressUrl);
 			if (!resolved) {
@@ -372,6 +480,7 @@ export function initReaderProgress() {
 
 		const markUserInteraction = () => {
 			userInteractedAfterRestore = true;
+			restoreGuardUntil = 0;
 		};
 
 		refreshScrollContainers();

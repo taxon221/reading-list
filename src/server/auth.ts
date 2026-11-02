@@ -1,3 +1,5 @@
+import { getConnInfo } from "hono/bun";
+import { sessionUser } from "./sessions";
 import { verifyAccessToken } from "../access";
 import { db } from "../db";
 import type { AppContext, CurrentUser } from "./types";
@@ -25,10 +27,11 @@ function getLocalDevAuthEmail(): string {
 	return normalizeEmail(Bun.env.LOCAL_DEV_AUTH_EMAIL);
 }
 
-function getConfiguredAuthMode() {
+export function getConfiguredAuthMode() {
 	const value = (Bun.env.AUTH_MODE || "").trim().toLowerCase();
-	if (value === "local" || value === "cloudflare") return value;
-	return "";
+	if (value === "app" || value === "local" || value === "cloudflare")
+		return value;
+	return "app";
 }
 
 export function getCurrentUser(c: AppContext): CurrentUser {
@@ -84,13 +87,23 @@ export function getSwitchAccountTarget(c: AppContext): string {
 export async function getAuthUiUrls(c: AppContext) {
 	const authRouteBase = getAuthRouteBase(c);
 	const { user } = await resolveRequestUser(c);
+	const appAuth = getConfiguredAuthMode() === "app";
 
 	return {
 		authMode: getConfiguredAuthMode(),
+		setupAvailable: appAuth && !user && Boolean(getLocalSetupUser(c)),
 		publicAppUrl,
-		loginUrl: authRouteBase,
-		logoutUrl: authRouteBase ? `${authRouteBase}/auth/logout` : "",
-		switchAccountUrl: authRouteBase ? `${authRouteBase}/auth/switch` : "",
+		loginUrl: appAuth ? "/#signin" : authRouteBase,
+		logoutUrl: appAuth
+			? "/api/auth/logout"
+			: authRouteBase
+				? `${authRouteBase}/auth/logout`
+				: "",
+		switchAccountUrl: appAuth
+			? ""
+			: authRouteBase
+				? `${authRouteBase}/auth/switch`
+				: "",
 		currentUser: user
 			? {
 					email: user.email,
@@ -101,12 +114,59 @@ export async function getAuthUiUrls(c: AppContext) {
 	};
 }
 
+// First-run setup is only available to a browser talking directly to a server
+// explicitly bound to loopback. Hosted installations still require invitations.
+export function getLocalSetupUser(c: AppContext): CurrentUser | null {
+	if (
+		getConfiguredAuthMode() !== "app" ||
+		!["127.0.0.1", "::1"].includes(Bun.env.APP_HOST || "") ||
+		!bootstrapAdminEmail ||
+		!Bun.env.APP_PUBLIC_URL ||
+		c.req.header("forwarded") ||
+		c.req.header("x-forwarded-for") ||
+		c.req.header("x-forwarded-host") ||
+		c.req.header("x-forwarded-proto")
+	)
+		return null;
+	const configured = new URL(Bun.env.APP_PUBLIC_URL);
+	const requested = new URL(c.req.url);
+	if (
+		!isLoopbackHostname(configured.hostname) ||
+		requested.origin !== configured.origin
+	)
+		return null;
+	try {
+		if (
+			!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(
+				getConnInfo(c).remote.address || "",
+			)
+		)
+			return null;
+	} catch {
+		return null;
+	}
+	return db
+		.query(
+			`SELECT u.* FROM users u WHERE u.email=? AND u.is_admin=1
+			 AND NOT EXISTS (SELECT 1 FROM auth_passkeys WHERE user_id=u.id)
+			 AND NOT EXISTS (SELECT 1 FROM auth_recovery_codes WHERE user_id=u.id)`,
+		)
+		.get(bootstrapAdminEmail) as CurrentUser | null;
+}
+
 function getLocalDevIdentity(c: AppContext) {
 	if (getConfiguredAuthMode() !== "local") return null;
 
 	const localDevAuthEmail = getLocalDevAuthEmail();
 	if (!localDevAuthEmail) return null;
 
+	let address = "";
+	try {
+		address = getConnInfo(c).remote.address || "";
+	} catch {
+		return null;
+	}
+	if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address)) return null;
 	const hostname = new URL(c.req.url).hostname.toLowerCase();
 	if (!isLoopbackHostname(hostname)) return null;
 
@@ -143,6 +203,10 @@ function getAccessJwtFromRequest(c: AppContext): string {
 }
 
 export async function resolveRequestUser(c: AppContext) {
+	if (getConfiguredAuthMode() === "app") {
+		const user = sessionUser(c);
+		return { status: user ? 200 : 401, user };
+	}
 	let identity = getLocalDevIdentity(c);
 
 	if (!identity && getConfiguredAuthMode() === "cloudflare") {

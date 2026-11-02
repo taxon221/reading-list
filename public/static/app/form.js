@@ -1,3 +1,4 @@
+import { clearDraft, saveDraft } from "./drafts.js";
 import {
 	defaultUrlPlaceholder,
 	dom,
@@ -13,7 +14,6 @@ import {
 	parseTitleAuthorFromFilename,
 	renderTagPills,
 	setupTagInput,
-	wait,
 } from "./utils.js";
 
 async function fetchMetadata(url) {
@@ -36,10 +36,12 @@ function clearPendingUploadFile() {
 }
 
 function resetAddForm(app) {
+	void clearDraft();
 	dom.form?.reset();
 	state.pendingTags.length = 0;
 	renderTagPills(state.pendingTags, dom.tagsContainer, dom.tagInput);
 	state.fetchedMeta = null;
+	state.hasChosenType = false;
 	clearPendingUploadFile();
 	closeAddModal();
 	app.loadItems?.();
@@ -71,7 +73,8 @@ function configureAddModal(mode) {
 				? "Add PDF / EPUB"
 				: "Add link";
 	}
-	if (dom.addUrlLabel) dom.addUrlLabel.textContent = isRss ? "RSS feed URL" : "URL";
+	if (dom.addUrlLabel)
+		dom.addUrlLabel.textContent = isRss ? "RSS feed URL" : "URL";
 	if (dom.urlInput) {
 		dom.urlInput.required = !isFile;
 		dom.urlInput.placeholder = isRss
@@ -82,8 +85,10 @@ function configureAddModal(mode) {
 	if (dom.addUrlGroup) dom.addUrlGroup.hidden = isFile;
 	if (dom.addDetailsGroup) dom.addDetailsGroup.hidden = isRss;
 	if (dom.addTypeGroup) dom.addTypeGroup.hidden = isFile || isRss;
-	if (dom.addFilePicker) dom.addFilePicker.style.display = isFile ? "inline-flex" : "none";
-	if (dom.addFileSummary) dom.addFileSummary.hidden = !isFile || !state.pendingUploadFile;
+	if (dom.addFilePicker)
+		dom.addFilePicker.style.display = isFile ? "inline-flex" : "none";
+	if (dom.addFileSummary)
+		dom.addFileSummary.hidden = !isFile || !state.pendingUploadFile;
 	if (dom.submitBtn) dom.submitBtn.textContent = isRss ? "Add RSS feed" : "Add";
 	if (dom.typeSelect && mode === "link") dom.typeSelect.value = "article";
 }
@@ -100,6 +105,7 @@ function openAddModal(mode) {
 	state.pendingTags.length = 0;
 	renderTagPills(state.pendingTags, dom.tagsContainer, dom.tagInput);
 	state.fetchedMeta = null;
+	state.hasChosenType = false;
 	clearPendingUploadFile();
 	configureAddModal(mode);
 	if (dom.addModal) dom.addModal.style.display = "flex";
@@ -489,25 +495,17 @@ async function submitItemForm(app, event) {
 			return;
 		}
 
-		if (state.isFetching) await wait(500);
+		// Save the URL immediately; the server enriches it in the background.
 
-		let title = dom.titleInput?.value.trim() || "";
-		let author =
+		const title = dom.titleInput?.value.trim() || "";
+		const author =
 			dom.authorInput?.value.trim() || state.fetchedMeta?.author || "";
-		let type = dom.typeSelect?.value || "article";
-		let previewImage = state.fetchedMeta?.image || "";
-		let readingTimeMinutes = state.fetchedMeta?.reading_time_minutes ?? null;
-
-		if (!title && !state.fetchedMeta) {
-			const meta = await fetchMetadata(url);
-			if (meta) {
-				title = meta.title || "";
-				author = author || meta.author || "";
-				type = meta.type || type;
-				previewImage = meta.image || "";
-				readingTimeMinutes = meta.reading_time_minutes ?? null;
-			}
-		}
+		const type =
+			state.hasChosenType || state.fetchedMeta
+				? dom.typeSelect?.value || "article"
+				: undefined;
+		const previewImage = state.fetchedMeta?.image || "";
+		const readingTimeMinutes = state.fetchedMeta?.reading_time_minutes ?? null;
 
 		const response = await fetch("/api/items", {
 			method: "POST",
@@ -523,9 +521,39 @@ async function submitItemForm(app, event) {
 			}),
 		});
 
-		if (handleAuthFailure(response)) return;
-		if (!response.ok) return;
+		if (handleAuthFailure(response)) {
+			await saveDraft();
+			return;
+		}
+		const result = await response.json().catch(() => ({}));
+		if (!response.ok)
+			throw new Error(
+				result.error || "Couldn't save this link. Please try again.",
+			);
 		resetAddForm(app);
+		showToast(
+			result.duplicate
+				? "Already saved in your library."
+				: "Saved to your reading list.",
+		);
+		if (result.duplicate) {
+			const existing = await fetch(`/api/items/${result.id}`).then((response) =>
+				response.json(),
+			);
+			if (existing.id)
+				app.openReader?.(
+					existing.id,
+					existing.url,
+					existing.title,
+					existing.type,
+				);
+		}
+	} catch (error) {
+		await saveDraft();
+		showToast(
+			error.message || "Couldn't save. Your draft is kept on this device.",
+			{ type: "error" },
+		);
 	} finally {
 		dom.submitBtn.disabled = false;
 		dom.submitBtn.textContent = "Add";
@@ -582,6 +610,27 @@ function handleShareStatusParams(app) {
 }
 
 async function handleShareTarget(app) {
+	if (state.authUi.currentUser) {
+		const pending = await fetch("/api/pending-share")
+			.then((r) => (r.ok ? r.json() : null))
+			.catch(() => null);
+		if (pending?.error) showToast(pending.error, { type: "error" });
+		if (pending?.item) {
+			showToast(`Saved “${pending.title}”.`);
+			await app.loadItems?.();
+			cleanShareParams();
+			return;
+		}
+		if (pending?.url) {
+			openAddModal("link");
+			dom.urlInput.value = pending.url;
+			dom.titleInput.value = pending.title || "";
+			await saveDraft();
+			cleanShareParams();
+			return;
+		}
+	}
+
 	if (handleShareStatusParams(app)) {
 		return;
 	}
@@ -603,7 +652,6 @@ async function handleShareTarget(app) {
 
 	if (state.isUnauthorized) {
 		showToast("Sign in to save shared content.", { type: "error" });
-		cleanShareParams();
 		return;
 	}
 
@@ -698,7 +746,10 @@ async function importAllRssSubscriptions(app) {
 		}
 
 		const results = Array.isArray(data.results) ? data.results : [];
-		const imported = results.reduce((sum, result) => sum + (result.imported || 0), 0);
+		const imported = results.reduce(
+			(sum, result) => sum + (result.imported || 0),
+			0,
+		);
 		const failed = results.filter((result) => !result.ok).length;
 		setRssStatus(
 			failed
@@ -754,7 +805,9 @@ function initAddMenu() {
 	});
 	dom.addModalClose?.addEventListener("click", closeAddModal);
 	dom.addModalCancel?.addEventListener("click", closeAddModal);
-	dom.addFilePicker?.addEventListener("click", () => dom.fileUploadInput?.click());
+	dom.addFilePicker?.addEventListener("click", () =>
+		dom.fileUploadInput?.click(),
+	);
 	document.addEventListener("click", (event) => {
 		if (dom.addEntry?.contains(event.target)) return;
 		closeAddMenu();
@@ -786,7 +839,7 @@ function renderRssSubscriptions(subscriptions) {
 		main.append(title, url);
 		const remove = document.createElement("button");
 		remove.type = "button";
-		remove.className = "dropdown-clear";
+		remove.className = "btn-secondary";
 		remove.dataset.rssAction = "delete";
 		remove.dataset.rssId = String(subscription.id);
 		remove.textContent = "Remove";
@@ -806,6 +859,9 @@ async function loadRssSubscriptions() {
 }
 
 export function initForm(app) {
+	dom.typeSelect?.addEventListener("change", () => {
+		state.hasChosenType = true;
+	});
 	setupTagInput(dom.tagInput, state.pendingTags, dom.tagsContainer, {
 		preferSuggestionOnTab: true,
 	});

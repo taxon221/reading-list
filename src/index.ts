@@ -1,4 +1,6 @@
 import { registerLibraryRoutes } from "./server/register-library-routes";
+import { registerAuthRoutes } from "./server/register-auth-routes";
+import { HTTPException } from "hono/http-exception";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { csrf } from "hono/csrf";
@@ -20,9 +22,22 @@ import { renderIndexPage } from "./ui/index-page";
 
 const app = new Hono<AppBindings>();
 const indexPage = renderIndexPage();
-const protectBrowserForms = csrf();
+const protectBrowserForms = csrf({
+	origin: (origin, c) =>
+		origin === new URL(Bun.env.APP_PUBLIC_URL || c.req.url).origin,
+});
 
 initDb();
+app.onError((error, c) => {
+	if (error instanceof HTTPException) return error.getResponse();
+	if (c.req.path.startsWith("/api/auth/"))
+		return c.json(
+			{ error: "Could not verify this request. Please try again." },
+			400,
+		);
+	console.error("Request failed", error);
+	return c.json({ error: "Something went wrong. Please try again." }, 500);
+});
 
 app.use(
 	"/*",
@@ -41,6 +56,8 @@ app.use("/*", async (c, next) => {
 
 	const path = c.req.path;
 	if (
+		path.startsWith("/api/") ||
+		path === "/sw.js" ||
 		path === "/" ||
 		path === "/share-target" ||
 		path === "/manifest.webmanifest" ||
@@ -59,9 +76,11 @@ app.get(
 	serveStatic({ path: "./public/manifest.webmanifest" }),
 );
 app.get("/pdf-reader.html", serveStatic({ path: "./public/pdf-reader.html" }));
+app.get("/sw.js", serveStatic({ path: "./public/sw.js" }));
 app.get("/", (c) => c.html(indexPage));
 
 registerShareRoutes(app);
+registerAuthRoutes(app);
 
 app.get("/api/auth/info", async (c) => c.json(await getAuthUiUrls(c)));
 app.get("/auth/logout", (c) => {
@@ -96,4 +115,10 @@ registerRssRoutes(app);
 const port = Bun.env.PORT || 3000;
 console.log(`Reading List running at http://localhost:${port}`);
 
-export default { port, fetch: app.fetch };
+const localMode = Bun.env.AUTH_MODE === "local";
+export default {
+	port,
+	hostname: Bun.env.APP_HOST || (localMode ? "127.0.0.1" : "0.0.0.0"),
+	maxRequestBodySize: 128 * 1024 * 1024,
+	fetch: app.fetch,
+};

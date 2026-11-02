@@ -3,10 +3,14 @@ import { initListDelete, invalidateListDeleteFacets } from "./list-delete.js";
 import { createListEditing } from "./list-edit.js";
 import { createListFilters } from "./list-filters.js";
 import { createListRenderer } from "./list-render.js";
-import { createSavedViews, getCurrentFilters } from "./list-saved-views.js";
+import { createSavedViews } from "./list-saved-views.js";
 import { initListSearch, syncListSearchUi } from "./list-search.js";
 import { dom, handleAuthFailure, state } from "./shared.js";
 import { shouldIgnoreKeyboardShortcut } from "./utils.js";
+import {
+	captureProgressSnapshot,
+	mergePendingProgress,
+} from "./reader-progress.js";
 
 function showView(view) {
 	dom.viewTabs.forEach((tab) => {
@@ -21,8 +25,48 @@ function showView(view) {
 	}
 }
 
+const READ_STATUS_KEY = "reading-list-read-status";
+const READ_STATUSES = ["all", "unread", "in-progress"];
+
+function setReadStatus(status) {
+	state.readStatus = status;
+	try {
+		localStorage.setItem(READ_STATUS_KEY, status);
+	} catch {}
+}
+
 export function initList(app) {
 	const filters = createListFilters({ refreshList });
+	try {
+		const saved = localStorage.getItem(READ_STATUS_KEY);
+		if (READ_STATUSES.includes(saved)) state.readStatus = saved;
+	} catch {}
+	document.querySelectorAll("[data-status]").forEach((button) => {
+		button.addEventListener("click", () => {
+			setReadStatus(button.dataset.status);
+			state.activeSavedViewIds = [];
+			refreshList();
+		});
+	});
+	window.addEventListener("reading:clear-filters", () => {
+		for (const key of [
+			"selectedTypes",
+			"selectedTags",
+			"excludedTags",
+			"selectedDomains",
+			"excludedDomains",
+			"selectedAuthors",
+			"excludedAuthors",
+			"searchTokens",
+			"activeSavedViewIds",
+		])
+			state[key] = [];
+		state.searchQuery = "";
+		setReadStatus("all");
+		if (dom.searchInput) dom.searchInput.value = "";
+		refreshList();
+	});
+	window.addEventListener("reading:add", () => app.openAddModal?.("link"));
 	const renderer = createListRenderer({
 		onToggleInclude: filters.toggleInclude,
 		onToggleExclude: filters.toggleExclude,
@@ -39,6 +83,20 @@ export function initList(app) {
 	});
 
 	app.loadItems = loadItems;
+	app.refreshList = refreshList;
+	app.refreshReaderItem = (id) => {
+		const item = state.itemsById.get(Number(id));
+		if (!item) return;
+		const existing = dom.itemsList?.querySelector(
+			`.item[data-id="${Number(id)}"]`,
+		);
+		const visible = filters.applyClientFilters([item]).length > 0;
+		if (existing && visible) renderer.updateItem(item);
+		else if (existing) {
+			existing.remove();
+			if (!dom.itemsList.querySelector(".item")) renderCurrentItems();
+		} else if (visible) renderCurrentItems();
+	};
 	app.loadSavedViews = savedViews.loadSavedViews;
 	app.loadTags = loadTags;
 	app.showView = showView;
@@ -49,10 +107,17 @@ export function initList(app) {
 	function renderCurrentItems() {
 		renderer.renderItems(
 			filters.applyClientFilters(Array.from(state.itemsById.values())),
+			{ empty: state.itemsById.size === 0 },
 		);
 	}
 
 	function syncFilterUi() {
+		document.querySelectorAll("[data-status]").forEach((button) => {
+			button.setAttribute(
+				"aria-pressed",
+				String(button.dataset.status === state.readStatus),
+			);
+		});
 		filters.syncTypeInputs();
 		filters.updateTypeFilterDisplay();
 		filters.updateTagDropdownState();
@@ -74,26 +139,45 @@ export function initList(app) {
 	async function loadItems() {
 		if (state.isUnauthorized) return;
 
-		const filtersState = getCurrentFilters();
-		const params = new URLSearchParams();
-		if (filtersState.selectedTags.length > 0)
-			params.set("tags", filtersState.selectedTags.join(","));
-		if (filtersState.excludedTags.length > 0) {
-			params.set("exclude_tags", filtersState.excludedTags.join(","));
-		}
-		if (filtersState.selectedTypes.length > 0)
-			params.set("types", filtersState.selectedTypes.join(","));
-
-		const url = `/api/items${params.toString() ? `?${params.toString()}` : ""}`;
+		const url = "/api/items";
+		const progressSnapshot = captureProgressSnapshot();
+		const status = document.getElementById("library-status");
+		status.textContent = "Loading your library…";
 		const response = await fetch(url).catch(() => null);
-		if (!response) return;
-		if (handleAuthFailure(response)) return;
-		if (!response.ok) return;
-
-		const items = await response.json();
+		if (!response || (!response.ok && ![401, 403].includes(response.status))) {
+			status.replaceChildren(
+				document.createTextNode("Couldn't load your library. "),
+			);
+			const retry = document.createElement("button");
+			retry.className = "header-link";
+			retry.textContent = "Try again";
+			retry.onclick = loadItems;
+			status.append(retry);
+			return;
+		}
+		if (handleAuthFailure(response)) {
+			status.textContent = "";
+			return;
+		}
+		let items;
+		try {
+			items = await response.json();
+		} catch {
+			status.textContent = "Couldn't load your library. Please try again.";
+			return;
+		}
+		if (
+			progressSnapshot.account !== (state.authUi.currentUser?.email || "guest")
+		)
+			return;
+		items = mergePendingProgress(items, progressSnapshot);
+		status.textContent = "";
 		state.itemsById = new Map(items.map((item) => [Number(item.id), item]));
 		syncFilterUi();
-		renderer.renderItems(filters.applyClientFilters(items));
+		renderer.renderItems(filters.applyClientFilters(items), {
+			empty: items.length === 0,
+		});
+		window.dispatchEvent(new Event("reading:library-loaded"));
 	}
 
 	async function loadTags() {

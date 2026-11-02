@@ -1,3 +1,4 @@
+import { showToast } from "./toast.js";
 import {
 	dom,
 	handleAuthFailure,
@@ -58,8 +59,13 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ is_read: !currentStatus }),
 		}).catch(() => null);
-		if (!response) return;
-		if (handleAuthFailure(response)) return;
+		if (response && handleAuthFailure(response)) return;
+		if (!response?.ok) {
+			showToast("Couldn't update this item. Please try again.", {
+				type: "error",
+			});
+			return;
+		}
 
 		loadItems();
 	}
@@ -71,8 +77,13 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 		const response = await fetch(`/api/items/${id}`, {
 			method: "DELETE",
 		}).catch(() => null);
-		if (!response) return;
-		if (handleAuthFailure(response)) return;
+		if (response && handleAuthFailure(response)) return;
+		if (!response?.ok) {
+			showToast("Couldn't update this item. Please try again.", {
+				type: "error",
+			});
+			return;
+		}
 
 		loadItems();
 		loadTags();
@@ -230,8 +241,13 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload),
 			}).catch(() => null);
-			if (!response) return;
-			if (handleAuthFailure(response)) return;
+			if (response && handleAuthFailure(response)) return;
+			if (!response?.ok) {
+				showToast("Couldn't save your changes. Please try again.", {
+					type: "error",
+				});
+				return;
+			}
 
 			closeEditModal();
 			loadItems();

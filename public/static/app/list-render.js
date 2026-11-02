@@ -103,8 +103,8 @@ function buildThumbPlaceholder(type) {
 function getThumbIconSources(url) {
 	const parsedUrl = new URL(url);
 	return {
-		primary: `https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(parsedUrl.origin)}&sz=64`,
-		fallback: `https://icons.duckduckgo.com/ip3/${parsedUrl.hostname}.ico`,
+		primary: `/api/image?url=${encodeURIComponent(`${parsedUrl.origin}/favicon.ico`)}`,
+		fallback: "",
 	};
 }
 
@@ -152,7 +152,7 @@ function buildThumbContent(type, url, previewImage) {
 		img.onerror = () => {
 			applyThumbIcon(img);
 		};
-		img.src = resolvedPreview;
+		img.src = `/api/image?url=${encodeURIComponent(resolvedPreview)}`;
 	} else {
 		applyThumbIcon(img);
 	}
@@ -188,7 +188,8 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 		const right = document.createElement("div");
 		right.className = "item-col-right";
 
-		const title = document.createElement("span");
+		const title = document.createElement("button");
+		title.type = "button";
 		title.className = "item-title";
 		title.dataset.action = "open-reader";
 		title.textContent = item.title || item.url;
@@ -349,17 +350,39 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 		return article;
 	}
 
-	function renderItems(items) {
+	function renderItems(items, { empty = false } = {}) {
 		if (!dom.itemsList) return;
 
 		if (items.length === 0) {
 			dom.itemsList.replaceChildren(
-				createEmptyState("No items yet", "Paste a URL above to get started"),
+				createEmptyState(
+					empty ? "Your reading space is ready" : "No matches",
+					empty
+						? "Use Add to save your first link, PDF or EPUB."
+						: "Try another search or clear your filters.",
+				),
 			);
+			const action = document.createElement("button");
+			action.type = "button";
+			action.className = "btn-secondary";
+			action.textContent = empty ? "Add a link" : "Clear filters";
+			action.addEventListener("click", () =>
+				window.dispatchEvent(
+					new Event(empty ? "reading:add" : "reading:clear-filters"),
+				),
+			);
+			dom.itemsList.firstElementChild?.append(action);
 			return;
 		}
 
 		dom.itemsList.replaceChildren(...items.map(createItemElement));
+	}
+
+	function updateItem(item) {
+		const existing = dom.itemsList?.querySelector(
+			`.item[data-id="${Number(item.id)}"]`,
+		);
+		if (existing) existing.replaceWith(createItemElement(item));
 	}
 
 	function renderTagOptions(
@@ -414,6 +437,7 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 
 	return {
 		renderItems,
+		updateItem,
 		renderTagOptions,
 	};
 }

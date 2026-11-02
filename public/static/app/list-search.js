@@ -261,7 +261,7 @@ function getSearchSuggestions(typeValues) {
 					valueQuery,
 				);
 				suggestions.push({
-					key: `typed:${definition.field}:${variant}:${valueQuery.toLowerCase()}`,
+					key: `field:${definition.field}:${variant}:${valueQuery.toLowerCase()}`,
 					element: createSearchSuggestionButton({
 						text: getSearchTokenLabel(token),
 						title: "Add this filter",
@@ -284,7 +284,7 @@ function getSearchSuggestions(typeValues) {
 						value,
 					);
 					suggestions.push({
-						key: `match:${definition.field}:${variant}:${value.toLowerCase()}`,
+						key: `field:${definition.field}:${variant}:${value.toLowerCase()}`,
 						element: createSearchSuggestionButton({
 							text: getSearchTokenLabel(token),
 							title: "Use a matching value",

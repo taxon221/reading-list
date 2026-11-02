@@ -1,6 +1,6 @@
 import { getCurrentFilters } from "./list-saved-views.js";
 import { dom, state } from "./shared.js";
-import { applySearch, getDomain } from "./utils.js";
+import { applySearch, getDomain, parseReadingProgress } from "./utils.js";
 
 const CLIENT_ONLY_FILTER_TYPES = new Set(["domain", "author"]);
 
@@ -109,11 +109,18 @@ export function createListFilters({ refreshList }) {
 
 	function applyClientFilters(items) {
 		const filters = getCurrentFilters();
-		let result = applySearch(
-			items,
-			filters.searchQuery,
-			filters.searchTokens,
-		);
+		if (filters.selectedTypes.length)
+			items = items.filter((item) => filters.selectedTypes.includes(item.type));
+		if (filters.selectedTags.length)
+			items = items.filter((item) =>
+				item.tags.some((tag) => filters.selectedTags.includes(tag)),
+			);
+		if (filters.excludedTags.length)
+			items = items.filter(
+				(item) => !item.tags.some((tag) => filters.excludedTags.includes(tag)),
+			);
+
+		let result = applySearch(items, filters.searchQuery, filters.searchTokens);
 		if (filters.selectedDomains.length > 0) {
 			result = result.filter((item) =>
 				filters.selectedDomains.includes(getDomain(item.url)),
@@ -140,6 +147,16 @@ export function createListFilters({ refreshList }) {
 							(item.author || "").toLowerCase() === author.toLowerCase(),
 					),
 			);
+		}
+		if (filters.readStatus === "in-progress") {
+			result = result.filter((item) => {
+				const progress = parseReadingProgress(item.reading_progress);
+				return (
+					!item.is_read &&
+					progress &&
+					Number(progress.ratio || progress.percentage || 0) > 0
+				);
+			});
 		}
 		if (filters.readStatus === "read") {
 			result = result.filter((item) => Boolean(item.is_read));

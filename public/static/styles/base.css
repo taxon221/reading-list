@@ -20,7 +20,8 @@
     --success: #10b981;
     --danger: #ef4444;
     --radius: 10px;
-    --radius-sm: 6px;
+    --radius-sm: 8px;
+    --header-control-size: 40px;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
@@ -86,6 +87,21 @@ header h1 {
     align-items: center;
     gap: 0.5rem;
     position: relative;
+}
+
+.header-actions .add-menu-button,
+.header-actions .account-icon-btn,
+.header-actions .theme-toggle {
+    height: var(--header-control-size);
+    min-height: var(--header-control-size);
+    font-size: 0.875rem;
+    line-height: 1;
+}
+
+.header-actions .account-icon-btn,
+.header-actions .theme-toggle {
+    width: var(--header-control-size);
+    min-width: var(--header-control-size);
 }
 
 .header-link,
@@ -156,7 +172,7 @@ header h1 {
     border: 1px solid var(--border);
     background: var(--accent);
     color: #fff;
-    border-radius: 999px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     transition:
         background 0.15s,
@@ -221,19 +237,25 @@ header h1 {
 
 .account-modal {
     position: relative;
+    display: flex;
+    flex-direction: column;
     width: 100%;
-    max-width: 380px;
+    max-width: 780px;
+    height: min(620px, calc(100dvh - 2rem));
+    max-height: calc(100dvh - 2rem);
+    overflow: hidden;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-lg);
+    border-radius: 16px;
+    box-shadow: 0 16px 48px rgb(0 0 0 / 16%);
 }
 
 .account-modal-header {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     justify-content: space-between;
-    padding: 0.85rem 1rem;
+    padding: 1.1rem 1.5rem;
     border-bottom: 1px solid var(--border);
 }
 
@@ -243,87 +265,195 @@ header h1 {
     color: var(--text);
 }
 
-.account-modal-body {
-    padding: 1rem 1.1rem 1.15rem;
-}
-
-.account-title {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--text);
-}
-
-.account-email,
-.account-meta {
-    margin-top: 0.35rem;
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-    overflow-wrap: anywhere;
-    line-height: 1.45;
-}
-
-.account-guest-message {
-    font-size: 0.875rem;
-    color: var(--text);
-    line-height: 1.5;
-}
-
-.account-modal-action {
-    width: 100%;
-    margin-top: 1rem;
-    min-height: 40px;
-    font-weight: 600;
-    justify-content: center;
-}
-
-.import-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-.account-section {
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--border);
-}
-
-.account-section h3 {
-    font-size: 0.9rem;
-    font-weight: 600;
-    margin-bottom: 0.65rem;
-}
-
-.rss-subscriptions-list {
+.account-modal-header .modal-close {
     display: grid;
-    gap: 0.6rem;
-}
-
-.rss-subscription-row {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.65rem;
-    border: 1px solid var(--border);
+    place-items: center;
+    width: 28px;
+    height: 28px;
     border-radius: var(--radius-sm);
     background: var(--bg);
 }
 
-.rss-subscription-main {
-    display: grid;
-    gap: 0.25rem;
-    min-width: 0;
+.account-modal-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
-.rss-subscription-main strong,
-.rss-subscription-main a {
+.settings-layout {
+    display: grid;
+    grid-template-columns: 156px minmax(0, 1fr);
+    height: 100%;
+}
+
+.settings-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem 0.65rem;
+    border-right: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 55%, var(--bg-card));
+}
+
+.settings-nav button {
+    display: block;
+    padding: 0.65rem 0.85rem;
+    border: 0;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    background: none;
+    font: inherit;
+    font-size: 0.875rem;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.settings-nav button:hover,
+.settings-nav button[aria-selected="true"] {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+    color: var(--text);
+}
+
+.settings-nav button[aria-selected="true"] { font-weight: 500; }
+
+.settings-content {
+    min-width: 0;
+    min-height: 0;
+    padding: 1.75rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.settings-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 34px;
+    margin-bottom: 1rem;
+}
+
+.settings-page-header > .settings-page-title {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.settings-page-header + .account-section {
+    margin-top: 0;
+}
+
+.settings-card {
+    padding: 0 1rem;
+    background: color-mix(in srgb, var(--bg) 55%, var(--bg-card));
+    border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+    border-radius: 10px;
+}
+
+.settings-row,
+.device-row,
+.settings-profile {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 0;
+}
+
+.settings-profile { padding: 1rem; }
+.settings-row + .settings-row,
+.device-row + .device-row { border-top: 1px solid var(--border); }
+.settings-row > div,
+.device-row > div,
+.settings-profile > div { min-width: 0; }
+
+.settings-row h4,
+.device-row strong,
+.account-title {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.5;
     overflow-wrap: anywhere;
 }
 
-.rss-subscription-main a {
+.settings-row p,
+.device-row p,
+.account-email,
+.account-meta {
+    margin-top: 0.25rem;
     color: var(--text-muted);
-    font-size: 0.78rem;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.account-modal .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-height: 34px;
+    padding: 0.4rem 0.65rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.75rem;
+    line-height: 1.4;
     text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 3%);
+}
+
+.account-modal .btn-secondary:hover { background: var(--bg); }
+.account-modal .btn-secondary:disabled { opacity: 0.45; cursor: default; }
+.account-section { margin-top: 1.5rem; }
+.account-section > h4,
+.settings-section-heading h4 { font-size: 0.8125rem; font-weight: 500; }
+.account-section > h4 { margin-bottom: 0.75rem; }
+.settings-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
+.settings-recovery-row { margin-top: 1rem; }
+.settings-status { color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; margin: 0.75rem 0; }
+.settings-status:empty { display: none; }
+.settings-card > .account-meta { padding: 1rem 0; }
+.settings-invite-form { padding: 1rem; }
+.settings-invite-form label { font-size: 0.75rem; font-weight: 500; }
+.settings-input-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.settings-input-row input { min-width: 0; flex: 1; }
+.account-modal input { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem 0.7rem; font: inherit; font-size: 0.8125rem; color: var(--text); background: var(--bg-card); }
+#invite-result { margin-top: 0.75rem; }
+.settings-invite-form > .account-meta { padding: 0; margin-top: 0.75rem; }
+.settings-invite-form #invite-result { margin-top: 0; }
+
+.rss-subscriptions-list { display: grid; gap: 0.75rem; }
+.rss-subscription-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--bg) 55%, var(--bg-card)); }
+.rss-subscription-main { display: grid; gap: 0.3rem; min-width: 0; }
+.rss-subscription-main strong { font-size: 0.8125rem; font-weight: 500; overflow-wrap: anywhere; }
+.rss-subscription-main a { font-size: 0.75rem; color: var(--text-muted); text-decoration: none; overflow-wrap: anywhere; }
+.rss-subscription-row button { flex-shrink: 0; }
+.account-modal-overlay[data-guest="true"] .account-modal { max-width: 420px; height: auto; }
+#account-panel-guest { padding: 1.5rem; }
+.account-guest-message { font-size: 0.875rem; line-height: 1.5; }
+.account-modal-action { display: flex; margin-top: 1rem; min-height: 40px; justify-content: center; }
+.import-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+@media (max-width: 600px) {
+    .settings-layout { display: flex; flex-direction: column; }
+    .settings-nav { flex-direction: row; flex-shrink: 0; padding: 0.65rem; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
+    .settings-nav button { flex: 1; padding: 0.6rem; text-align: center; font-size: 0.8125rem; }
+    .settings-content { flex: 1; padding: 1.25rem; }
+    .account-modal-header { padding: 1rem 1.25rem; }
+    .settings-row, .device-row, .settings-profile { gap: 0.75rem; }
+    .settings-row { align-items: flex-start; flex-wrap: wrap; }
+    .settings-row > div { flex: 1 1 150px; }
+    .settings-input-row { flex-wrap: wrap; }
+    .settings-input-row input { flex-basis: 100%; }
 }
 
 .file-picker-btn {
@@ -377,3 +507,20 @@ header h1 {
 .theme-toggle[data-theme-mode="light"] .theme-symbol-light {
     display: block;
 }
+
+.settings-rss-description {
+    margin: -0.5rem 0 1.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+}
+
+.invitation-list { margin-top: 1rem; }
+.invitation-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.85rem 0; border-bottom: 1px solid var(--border); }
+.invitation-row > div:first-child { min-width: 0; }
+.invitation-row strong { font-size: 0.8125rem; font-weight: 500; overflow-wrap: anywhere; }
+.invitation-row p { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.3rem; line-height: 1.5; }
+.invitation-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; flex-shrink: 0; }
+.invitation-badge { display: inline-block; margin-left: 0.5rem; padding: 0.15rem 0.4rem; border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); font-size: 0.65rem; font-weight: 400; }
+.invitation-badge[data-status="accepted"] { color: var(--success); }
+@media (max-width:600px) { .invitation-row { align-items: flex-start; flex-direction: column; } }

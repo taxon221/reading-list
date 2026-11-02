@@ -9,7 +9,7 @@
 		"rss:import": "bun run src/import-rss.ts",
 		"backfill:preview-images": "bun run src/backfill-preview-images.ts",
 		"backfill:reading-times": "bun run src/backfill-reading-times.ts",
-		"lint": "biome lint src scripts public/static/app public/static/app.js public/static/pdf-reader.js",
+		"lint": "biome lint src scripts public/static/app public/static/app.js public/static/pdf-reader.js public/sw.js",
 		"typecheck": "tsc -p tsconfig.json",
 		"test": "bun test",
 		"check": "bun run lint && bun run typecheck && bun run test",

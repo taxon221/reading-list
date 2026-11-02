@@ -2,15 +2,16 @@ services:
   reading-list:
     build: .
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./data:/app/data
     environment:
       PORT: 3000
-      AUTH_MODE: ${AUTH_MODE:-local}
+      AUTH_MODE: ${AUTH_MODE:-app}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?BOOTSTRAP_ADMIN_EMAIL is required}
       LOCAL_DEV_AUTH_EMAIL: ${LOCAL_DEV_AUTH_EMAIL:-}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       CLOUDFLARE_ACCESS_TEAM_DOMAIN: ${CLOUDFLARE_ACCESS_TEAM_DOMAIN:-}
       CLOUDFLARE_ACCESS_AUD: ${CLOUDFLARE_ACCESS_AUD:-}
     restart: unless-stopped

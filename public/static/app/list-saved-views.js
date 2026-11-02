@@ -72,7 +72,9 @@ function sanitizeSearchToken(token) {
 
 function sanitizeSavedViewFilters(filters = {}) {
 	const readStatus =
-		filters.readStatus === "read" || filters.readStatus === "unread"
+		filters.readStatus === "read" ||
+		filters.readStatus === "unread" ||
+		filters.readStatus === "in-progress"
 			? filters.readStatus
 			: "all";
 	const selectedTypes = sanitizeStringArray(filters.selectedTypes, {
@@ -227,8 +229,14 @@ export function getCurrentFilters(baseFilters = getCurrentManualFilters()) {
 		return {
 			readStatus:
 				overlay.readStatus !== "all" ? overlay.readStatus : merged.readStatus,
-			selectedTypes: mergeStringArrays(merged.selectedTypes, overlay.selectedTypes),
-			selectedTags: mergeStringArrays(merged.selectedTags, overlay.selectedTags),
+			selectedTypes: mergeStringArrays(
+				merged.selectedTypes,
+				overlay.selectedTypes,
+			),
+			selectedTags: mergeStringArrays(
+				merged.selectedTags,
+				overlay.selectedTags,
+			),
 			excludedTags: sanitizeStringArray(
 				[...merged.excludedTags, ...overlay.excludedTags].filter(
 					(value) =>
@@ -260,15 +268,15 @@ export function getCurrentFilters(baseFilters = getCurrentManualFilters()) {
 			excludedAuthors: sanitizeStringArray(
 				[...merged.excludedAuthors, ...overlay.excludedAuthors].filter(
 					(value) =>
-						!mergeStringArrays(
-							merged.selectedAuthors,
-							overlay.selectedAuthors,
-						)
+						!mergeStringArrays(merged.selectedAuthors, overlay.selectedAuthors)
 							.map((entry) => entry.toLowerCase())
 							.includes(value.toLowerCase()),
 				),
 			),
-			searchTokens: mergeSearchTokens(merged.searchTokens, overlay.searchTokens),
+			searchTokens: mergeSearchTokens(
+				merged.searchTokens,
+				overlay.searchTokens,
+			),
 			searchQuery: overlay.searchQuery || merged.searchQuery,
 		};
 	}, baseFilters);
@@ -286,7 +294,9 @@ function toggleSavedViewId(viewId) {
 
 	const isActive = state.activeSavedViewIds.includes(viewId);
 	if (isActive) {
-		setActiveSavedViewIds(state.activeSavedViewIds.filter((id) => id !== viewId));
+		setActiveSavedViewIds(
+			state.activeSavedViewIds.filter((id) => id !== viewId),
+		);
 		return;
 	}
 
@@ -385,8 +395,9 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 
 		const activeName =
 			state.activeSavedViewIds.length === 1
-				? state.savedViews.find((view) => view.id === state.activeSavedViewIds[0])
-						?.name || ""
+				? state.savedViews.find(
+						(view) => view.id === state.activeSavedViewIds[0],
+					)?.name || ""
 				: "";
 		dom.saveViewModal.style.display = "flex";
 		if (dom.saveViewName) {
@@ -457,7 +468,10 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 				removeButton.className = "view-option-remove";
 				removeButton.textContent = "×";
 				removeButton.title = `Delete ${view.name}`;
-				removeButton.setAttribute("aria-label", `Delete saved view ${view.name}`);
+				removeButton.setAttribute(
+					"aria-label",
+					`Delete saved view ${view.name}`,
+				);
 				removeButton.addEventListener("click", (event) => {
 					event.preventDefault();
 					event.stopPropagation();

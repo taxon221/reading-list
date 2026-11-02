@@ -33,12 +33,13 @@ export function renderIndexMain() {
         <section class="search-section">
           <div class="search-shell" id="search-shell">
             <div class="search-token-list" id="search-token-list"></div>
-            <input type="text" id="search-input" class="search-input" placeholder='Search or add filters like \`type article\` or \`website != "less"\`' autocomplete="off" aria-keyshortcuts="S" />
+            <input type="text" id="search-input" class="search-input" placeholder="Search titles, authors or websites…" aria-label="Search your library" autocomplete="off" aria-keyshortcuts="S" title="Search (S)" />
             <button type="button" class="search-action-btn" id="save-view-open">Save view</button>
             <div class="search-suggestions" id="search-suggestions" aria-live="polite"></div>
           </div>
         </section>
 
+        <nav class="reading-status" aria-label="Reading status"><button type="button" data-status="unread" aria-pressed="false">Unread</button><button type="button" data-status="in-progress" aria-pressed="false">In progress</button><button type="button" data-status="all" aria-pressed="true">All</button></nav><p id="library-status" role="status" aria-live="polite"></p>
         <section class="filters">
           <div class="filters-row">
             <div class="filter-dropdown" id="type-dropdown">
@@ -70,7 +71,7 @@ export function renderIndexMain() {
               <div class="dropdown-menu views-menu" id="views-menu"><div class="dropdown-options views-options" id="views-options"></div></div>
             </div>
 
-            <div class="filter-dropdown" id="delete-dropdown">
+            <div class="filter-dropdown" id="delete-dropdown" hidden>
               <button type="button" class="filter-btn delete-filter-btn" id="delete-filter-btn"><span class="filter-label">Delete all</span><span class="filter-arrow">▾</span></button>
               <div class="dropdown-menu delete-menu" id="delete-menu">
                 <div class="delete-dropdown-heading">Match</div>

@@ -5,6 +5,7 @@ export const state = {
 	authMessage: "",
 	authUi: {
 		authMode: "",
+		setupAvailable: false,
 		publicAppUrl: "",
 		loginUrl: "",
 		logoutUrl: "",
@@ -45,6 +46,7 @@ export const state = {
 	pendingProgressSave: null,
 	pendingProgressItemId: null,
 	pendingProgressPayload: null,
+	pendingProgressAccount: null,
 	pendingScrollHighlightId: null,
 	pendingMobileSelectionCheck: null,
 	lockedBodyScrollY: 0,
@@ -204,6 +206,11 @@ function createStatusState(title, hint = "", action = null) {
 		const actionEl = document.createElement("a");
 		actionEl.className = "header-link";
 		actionEl.href = action.href;
+		if (state.authUi.authMode === "app")
+			actionEl.addEventListener("click", (event) => {
+				event.preventDefault();
+				window.dispatchEvent(new Event("reading:signin"));
+			});
 		actionEl.textContent = action.label;
 		wrapper.appendChild(actionEl);
 	}
@@ -212,6 +219,12 @@ function createStatusState(title, hint = "", action = null) {
 }
 
 function getGuestAuthLink() {
+	if (state.authUi.authMode === "app" && !state.authUi.currentUser) {
+		return {
+			href: "/#signin",
+			label: state.authUi.setupAvailable ? "Set up your account" : "Sign in",
+		};
+	}
 	const isLoopback = isLoopbackHost();
 
 	if (state.isUnauthorized) {
@@ -234,78 +247,21 @@ function getGuestAuthLink() {
 	return null;
 }
 
-function triggerBackgroundNavigation(url) {
-	if (!url) return;
-
-	const frame = document.createElement("iframe");
-	frame.hidden = true;
-	frame.tabIndex = -1;
-	frame.setAttribute("aria-hidden", "true");
-	frame.src = url;
-	document.body.appendChild(frame);
-
-	window.setTimeout(() => {
-		frame.remove();
-	}, 4000);
-}
-
 function beginCloudflareAccountSwitch() {
-	const teamLogoutUrl = state.authUi.switchAccountUrl;
-	const appLogoutUrl = state.authUi.logoutUrl;
-	const returnUrl = state.authUi.loginUrl || window.location.origin || "/";
-
-	if (!teamLogoutUrl) {
-		if (appLogoutUrl) window.location.assign(appLogoutUrl);
-		else window.location.assign(returnUrl);
-		return;
-	}
-
-	closeAccountModal();
-
-	if (appLogoutUrl) {
-		triggerBackgroundNavigation(appLogoutUrl);
-	}
-
-	let redirectStarted = false;
-	const redirectToApp = () => {
-		if (redirectStarted) return;
-		redirectStarted = true;
-		window.location.assign(returnUrl);
-	};
-
-	const popup = window.open(
-		teamLogoutUrl,
-		"reading-list-cloudflare-access-switch",
-		"popup=yes,width=520,height=720",
+	window.location.assign(
+		state.authUi.switchAccountUrl || state.authUi.logoutUrl || "/",
 	);
-
-	if (!popup) {
-		window.location.assign(teamLogoutUrl);
-		return;
-	}
-
-	popup.focus?.();
-
-	const closedPoll = window.setInterval(() => {
-		if (popup.closed) {
-			window.clearInterval(closedPoll);
-			redirectToApp();
-		}
-	}, 400);
-
-	window.setTimeout(() => {
-		window.clearInterval(closedPoll);
-		redirectToApp();
-	}, 2500);
 }
 
-function closeAccountModal() {
+export function closeAccountModal() {
 	if (!dom.accountButton || !dom.accountModalOverlay) return;
+	const wasOpen = !dom.accountModalOverlay.hidden;
 	dom.accountButton.setAttribute("aria-expanded", "false");
 	dom.accountModalOverlay.hidden = true;
 	dom.accountModalOverlay.style.display = "";
 	document.body.classList.remove("account-modal-open");
 	document.body.classList.remove("modal-open");
+	if (wasOpen) dom.accountButton.focus();
 }
 
 function openAccountModal() {
@@ -315,7 +271,20 @@ function openAccountModal() {
 	dom.accountModalOverlay.style.display = "flex";
 	document.body.classList.add("account-modal-open");
 	document.body.classList.add("modal-open");
+	selectSettingsSection("account");
 	dom.accountModalClose?.focus();
+}
+
+function selectSettingsSection(name) {
+	for (const tab of document.querySelectorAll("[data-settings-tab]")) {
+		const selected = tab.dataset.settingsTab === name;
+		tab.setAttribute("aria-selected", String(selected));
+		tab.tabIndex = selected ? 0 : -1;
+	}
+	for (const panel of document.querySelectorAll("[data-settings-panel]"))
+		panel.hidden = panel.dataset.settingsPanel !== name;
+	const content = document.querySelector(".settings-content");
+	if (content) content.scrollTop = 0;
 }
 
 function createGuestAccountIconSvg() {
@@ -422,6 +391,11 @@ function renderAccountModal() {
 	const hasUser = Boolean(user);
 
 	if (hasUser) {
+		dom.accountModalOverlay.dataset.guest = "false";
+		document.getElementById("settings-tab-security").hidden =
+			state.authUi.authMode !== "app";
+		document.getElementById("account-invite-section").hidden =
+			state.authUi.authMode !== "app" || !user.isAdmin;
 		accountEntry.hidden = false;
 		accountPanelUser.hidden = false;
 		accountPanelGuest.hidden = true;
@@ -429,16 +403,15 @@ function renderAccountModal() {
 		accountTitle.textContent = state.isUnauthorized
 			? "Signed in — reading list blocked"
 			: user.isAdmin
-				? "Admin account"
+				? "Owner account"
 				: "Signed in";
 		accountEmail.textContent = user.email;
 		if (state.isUnauthorized) {
 			accountMeta.textContent = state.authMessage;
 		} else {
-			const mode = state.authUi.authMode || "unknown";
-			accountMeta.textContent = `Sign-in method: ${mode}`;
+			accountMeta.textContent = "";
 		}
-		accountMeta.hidden = false;
+		accountMeta.hidden = !state.isUnauthorized;
 
 		const actionHref = state.authUi.switchAccountUrl || state.authUi.logoutUrl;
 		const actionLabel = state.authUi.switchAccountUrl
@@ -456,6 +429,7 @@ function renderAccountModal() {
 		return;
 	}
 
+	dom.accountModalOverlay.dataset.guest = "true";
 	accountEntry.hidden = false;
 	accountPanelUser.hidden = true;
 	accountPanelGuest.hidden = false;
@@ -469,7 +443,10 @@ function renderAccountModal() {
 
 	const mode = state.authUi.authMode;
 	if (mode) {
-		accountGuestMeta.textContent = `Sign-in method: ${mode}`;
+		accountGuestMeta.textContent =
+			mode === "app"
+				? "Use a passkey or recovery code to sign in."
+				: "Sign in to continue.";
 		accountGuestMeta.hidden = false;
 	} else {
 		accountGuestMeta.textContent = "";
@@ -510,16 +487,71 @@ export async function loadAuthUi() {
 	}
 
 	state.isUnauthorized = false;
+	if (dom.importBtn) dom.importBtn.disabled = false;
+	if (dom.deleteFilterBtn) dom.deleteFilterBtn.disabled = false;
 	state.authUi.authMode = data?.authMode || "";
+	state.authUi.setupAvailable = data?.setupAvailable === true;
 	state.authUi.publicAppUrl = data?.publicAppUrl || "";
 	state.authUi.loginUrl = data?.loginUrl || "";
 	state.authUi.logoutUrl = data?.logoutUrl || "";
 	state.authUi.switchAccountUrl = data?.switchAccountUrl || "";
+	const previousEmail = state.authUi.currentUser?.email;
 	state.authUi.currentUser = data?.currentUser || null;
+	if (previousEmail && previousEmail !== state.authUi.currentUser?.email)
+		window.dispatchEvent(new Event("reading:account-changed"));
 	renderAccountModal();
 }
 
 export function initAuthUi() {
+	const settingsTabs = [...document.querySelectorAll("[data-settings-tab]")];
+	for (const tab of settingsTabs) {
+		tab.addEventListener("click", () =>
+			selectSettingsSection(tab.dataset.settingsTab),
+		);
+		tab.addEventListener("keydown", (event) => {
+			if (
+				![
+					"ArrowUp",
+					"ArrowDown",
+					"ArrowLeft",
+					"ArrowRight",
+					"Home",
+					"End",
+				].includes(event.key)
+			)
+				return;
+			event.preventDefault();
+			const visibleTabs = settingsTabs.filter((item) => !item.hidden);
+			const index = visibleTabs.indexOf(tab);
+			const next =
+				event.key === "Home"
+					? 0
+					: event.key === "End"
+						? visibleTabs.length - 1
+						: (index +
+								(["ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 1) +
+								visibleTabs.length) %
+							visibleTabs.length;
+			selectSettingsSection(visibleTabs[next].dataset.settingsTab);
+			visibleTabs[next].focus();
+		});
+	}
+	const compactSettings = window.matchMedia("(max-width: 600px)");
+	const syncSettingsOrientation = () =>
+		document
+			.querySelector(".settings-nav")
+			?.setAttribute(
+				"aria-orientation",
+				compactSettings.matches ? "horizontal" : "vertical",
+			);
+	compactSettings.addEventListener("change", syncSettingsOrientation);
+	syncSettingsOrientation();
+	dom.authLink?.addEventListener("click", (event) => {
+		if (state.authUi.authMode === "app") {
+			event.preventDefault();
+			window.dispatchEvent(new Event("reading:signin"));
+		}
+	});
 	dom.accountButton?.addEventListener("click", (event) => {
 		event.stopPropagation();
 		const isOpen = dom.accountButton?.getAttribute("aria-expanded") === "true";
@@ -539,10 +571,24 @@ export function initAuthUi() {
 		closeAccountModal();
 	});
 
-	dom.accountAction?.addEventListener("click", (event) => {
+	dom.accountAction?.addEventListener("click", async (event) => {
+		if (state.authUi.authMode === "app") {
+			event.preventDefault();
+			await fetch("/api/auth/logout", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: "{}",
+			});
+			localStorage.setItem("reading-account-event", String(Date.now()));
+			window.dispatchEvent(new Event("reading:signout"));
+			window.location.assign("/#signin");
+			window.location.reload();
+			return;
+		}
 		if (!state.authUi.switchAccountUrl) return;
 
 		event.preventDefault();
+		localStorage.setItem("reading-account-event", String(Date.now()));
 		beginCloudflareAccountSwitch();
 	});
 
@@ -559,6 +605,7 @@ export function initAuthUi() {
 
 export function showUnauthorizedState(
 	message = "This account is not authorized for this reading list.",
+	{ title = "Not authorized", actionLabel = "Open protected app" } = {},
 ) {
 	state.isUnauthorized = true;
 	state.authMessage = message;
@@ -566,7 +613,9 @@ export function showUnauthorizedState(
 	renderAccountModal();
 
 	let action = null;
-	if (
+	if (state.authUi.authMode === "app" && !state.authUi.currentUser) {
+		action = { href: "/#signin", label: actionLabel };
+	} else if (
 		!isLoopbackHost() &&
 		(state.authUi.switchAccountUrl || state.authUi.logoutUrl)
 	) {
@@ -587,34 +636,47 @@ export function showUnauthorizedState(
 	}
 
 	if (dom.itemsList) {
-		dom.itemsList.replaceChildren(
-			createStatusState("Not authorized", message, action),
-		);
+		dom.itemsList.replaceChildren(createStatusState(title, message, action));
 	}
 
 	if (dom.notesList) {
-		dom.notesList.replaceChildren(
-			createStatusState("Not authorized", message, action),
-		);
+		dom.notesList.replaceChildren(createStatusState(title, message, action));
 	}
 }
 
-export function handleAuthFailure(response) {
-	if (!response || (response.status !== 401 && response.status !== 403)) {
-		return false;
-	}
-
-	const onProtectedApp =
-		!!state.authUi.publicAppUrl &&
-		window.location.origin === state.authUi.publicAppUrl;
-
+export function showSignedOutState() {
+	const setup =
+		state.authUi.setupAvailable || sessionStorage.getItem("reading-invite");
 	showUnauthorizedState(
-		response.status === 401
-			? onProtectedApp
-				? "Cloudflare Access login succeeded, but this app could not validate the token. Check CLOUDFLARE_ACCESS_TEAM_DOMAIN and CLOUDFLARE_ACCESS_AUD for this hostname."
-				: "Cloudflare Access did not provide a user identity."
-			: "This account is authenticated, but it is not mapped to a local reading-list user yet.",
+		setup
+			? "Set up your account to open your reading list."
+			: "Sign in to open your reading list.",
+		{
+			title: "Your reading list awaits",
+			actionLabel: setup ? "Set up your account" : "Sign in",
+		},
 	);
+}
 
+function getAuthFailureMessage(status) {
+	if (state.authUi.authMode === "cloudflare") {
+		if (status === 403)
+			return "This account is authenticated, but it is not mapped to a local reading-list user yet.";
+		return state.authUi.publicAppUrl &&
+			window.location.origin === state.authUi.publicAppUrl
+			? "Cloudflare Access login succeeded, but this app could not validate the token. Check CLOUDFLARE_ACCESS_TEAM_DOMAIN and CLOUDFLARE_ACCESS_AUD for this hostname."
+			: "Cloudflare Access did not provide a user identity.";
+	}
+	return status === 401
+		? "Your session has ended. Sign in again to continue; your unfinished work is kept on this device."
+		: "You don't have access to this action.";
+}
+
+export function handleAuthFailure(response) {
+	if (!response || ![401, 403].includes(response.status)) return false;
+	void import("./drafts.js").then(({ saveDraft }) => saveDraft());
+	showUnauthorizedState(getAuthFailureMessage(response.status));
+	if (response.status === 401 && state.authUi.authMode === "app")
+		window.dispatchEvent(new Event("reading:signin"));
 	return true;
 }
