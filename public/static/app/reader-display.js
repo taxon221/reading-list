@@ -88,7 +88,9 @@ export function showReaderError(
 	const messageEl = createReaderNode("<p></p>");
 	messageEl.textContent = message;
 
-	const actionsWrap = createReaderNode('<div class="reader-error-actions"></div>');
+	const actionsWrap = createReaderNode(
+		'<div class="reader-error-actions"></div>',
+	);
 	if (includeOpenOriginal) {
 		const link = createReaderNode('<a class="header-link"></a>');
 		const authorizedUrl = getAuthorizedItemUrl(url);
@@ -196,16 +198,8 @@ function escapeReaderHtml(value) {
 
 export function buildParsedArticleDocument(data) {
 	const theme = getArticleReaderTheme();
-	const {
-		isDark,
-		background,
-		text,
-		muted,
-		accent,
-		rule,
-		quote,
-		highlight,
-	} = theme;
+	const { isDark, background, text, muted, accent, rule, quote, highlight } =
+		theme;
 	const fontSize = getReaderFontSize();
 	const title = escapeReaderHtml(data.title || "");
 	const byline = escapeReaderHtml(data.byline || "");
@@ -215,6 +209,7 @@ export function buildParsedArticleDocument(data) {
 <html lang="en" data-reader-kind="parsed-article">
   <head>
     <meta charset="utf-8">
+    <base href="${window.location.origin}/">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>${title || "Article"}</title>
     <style>
@@ -233,10 +228,6 @@ export function buildParsedArticleDocument(data) {
       hr{border:0;border-top:1px solid var(--rl-reader-rule);margin:2rem 0}
       span.reader-highlight{background:var(--rl-reader-highlight);border-radius:.25em;padding:.04em .02em}
     </style>
-    <script>
-      window.__readingListSetTheme=function(theme){if(!theme)return;const root=document.documentElement;root.style.colorScheme=theme.isDark?"dark":"light";root.style.setProperty("--rl-reader-bg",theme.background);root.style.setProperty("--rl-reader-text",theme.text);root.style.setProperty("--rl-reader-muted",theme.muted);root.style.setProperty("--rl-reader-accent",theme.accent);root.style.setProperty("--rl-reader-rule",theme.rule);root.style.setProperty("--rl-reader-quote",theme.quote);root.style.setProperty("--rl-reader-highlight",theme.highlight)}
-      window.__readingListSetFontSize=function(size){if(!size)return;document.documentElement.style.setProperty("--rl-reader-font-size",size+"px")}
-    </script>
   </head>
   <body>
     <header class="rl-reader-header"><h1>${title}</h1>${byline ? `<p class="rl-byline">${byline}</p>` : ""}</header>
@@ -316,9 +307,7 @@ export function getArticleReaderTheme() {
 		accent: isDark ? "#60a5fa" : "#2563eb",
 		rule: isDark ? "#2d2d2d" : "#d8dde3",
 		quote: isDark ? "rgba(59,130,246,0.14)" : "rgba(59,130,246,0.08)",
-		highlight: isDark
-			? "rgba(96,165,250,0.3)"
-			: "rgba(59,130,246,0.22)",
+		highlight: isDark ? "rgba(96,165,250,0.3)" : "rgba(59,130,246,0.22)",
 	};
 }
 
@@ -400,7 +389,7 @@ export function mountPdfReader(fileUrl, itemId, readerApi) {
 export async function fetchParsedArticle(articleUrl) {
 	const safeArticleUrl = getSafeReaderFetchUrl(
 		articleUrl,
-		new Set(["/api/proxy"]),
+		new Set(["/api/proxy", "/api/items"]),
 	);
 	if (!safeArticleUrl) {
 		return {
@@ -411,6 +400,13 @@ export async function fetchParsedArticle(articleUrl) {
 	}
 
 	const response = await fetch(safeArticleUrl).catch(() => null);
+	if (response?.status === 401) {
+		window.dispatchEvent(new Event("reading:signin"));
+		return {
+			error: "Session ended",
+			message: "Sign in again to continue reading.",
+		};
+	}
 	if (!response) {
 		return {
 			error: "Failed to fetch content",
@@ -420,7 +416,11 @@ export async function fetchParsedArticle(articleUrl) {
 	}
 
 	try {
-		return await withTimeout(response.json(), 15000, "Timed out loading article.");
+		return await withTimeout(
+			response.json(),
+			15000,
+			"Timed out loading article.",
+		);
 	} catch (error) {
 		return {
 			error: "Failed to fetch content",

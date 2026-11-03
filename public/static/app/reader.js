@@ -23,7 +23,7 @@ import {
 } from "./reader-epub.js";
 import { initReaderHighlights } from "./reader-highlights.js";
 import { initReaderProgress } from "./reader-progress.js";
-import { dom, handleAuthFailure, state } from "./shared.js";
+import { dom, state } from "./shared.js";
 import {
 	getAuthorizedItemUrl,
 	getItemProgressInfo,
@@ -39,62 +39,22 @@ export function initReader(app) {
 	Object.assign(readerApi, initReaderProgress());
 	Object.assign(readerApi, initReaderHighlights(app, readerApi));
 
-	function getArticleErrorActions(itemId) {
-		const item = state.itemsById.get(Number(itemId));
-		const tags = Array.isArray(item?.tags) ? item.tags : [];
-		const hasFallbackTags =
-			tags.includes("paywall") && tags.includes("open original");
-
-		return [
-			{
-				label: hasFallbackTags ? "Open original" : "Tag + open original",
-				async onClick(button) {
-					button.disabled = true;
-					openReaderOriginal();
-
-					if (hasFallbackTags) {
-						button.textContent = "Opened";
-						return;
-					}
-
-					const item = state.itemsById.get(Number(itemId));
-					if (!item) {
-						button.textContent = "Opened";
-						return;
-					}
-
-					const tags = Array.isArray(item.tags) ? item.tags : [];
-					const nextTags = Array.from(
-						new Set([...tags, "paywall", "open original"]),
-					);
-					if (nextTags.length === tags.length) {
-						button.textContent = "Opened";
-						return;
-					}
-
-					button.textContent = "Saving...";
-
-					const response = await fetch(`/api/items/${itemId}`, {
-						method: "PATCH",
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ tags: nextTags }),
-					}).catch(() => null);
-					if (!response || handleAuthFailure(response) || !response.ok) {
-						button.disabled = false;
-						button.textContent = "Tag + open original";
-						return;
-					}
-
-					state.itemsById.set(Number(itemId), { ...item, tags: nextTags });
-					app.loadItems?.();
-					app.loadTags?.();
-					button.textContent = "Opened + tagged";
-				},
-			},
-		];
+	function getArticleErrorActions() {
+		return [{ label: "Open original", onClick: openReaderOriginal }];
 	}
 
-	async function openReader(id, itemUrl, title, type) {
+	async function openReader(
+		id,
+		itemUrl,
+		title,
+		type,
+		{ fromHistory = false } = {},
+	) {
+		if (!fromHistory) {
+			const hash = `#item=${id}`;
+			if (location.hash !== hash) history.pushState({ reader: true }, "", hash);
+		}
+		readerApi.flushPendingProgressSave?.();
 		resetEpubReader();
 		readerApi.stopArticleProgressPoll?.();
 		readerApi.stopMobileSelectionPoll?.();
@@ -168,25 +128,23 @@ export function initReader(app) {
 			return;
 		}
 
-		const articleUrl = getReaderSourceUrl(itemUrl, "article");
-		if (!articleUrl) {
+		// Prefer the saved clean copy. Fall back to the live proxy, which also
+		// handles podcasts/videos, PDFs behind extension-less links, and reports
+		// paywall/timeout reasons.
+		let data = await fetchParsedArticle(`/api/items/${id}/content`);
+		const proxyUrl = getReaderSourceUrl(itemUrl, "article");
+		if (data.error && data.error !== "Session ended" && proxyUrl)
+			data = await fetchParsedArticle(proxyUrl);
+		if (state.currentReaderId !== id) return;
+		if (data.error) {
 			showReaderError(
 				itemUrl,
-				"This URL is not supported. Only local files and public http(s) URLs can be opened.",
+				data.message || "Failed to load content",
+				getArticleErrorActions(),
+				{ includeOpenOriginal: false },
 			);
 			return;
 		}
-
-		const data = await fetchParsedArticle(articleUrl);
-			if (data.error) {
-				showReaderError(
-					itemUrl,
-					data.message || "Failed to load content",
-					getArticleErrorActions(id),
-					{ includeOpenOriginal: false },
-				);
-				return;
-			}
 
 		if (data.type === "html") {
 			const iframe = document.createElement("iframe");
@@ -240,7 +198,15 @@ export function initReader(app) {
 		);
 	}
 
-	function closeReader() {
+	function closeReader({ fromHistory = false } = {}) {
+		if (!fromHistory && location.hash.startsWith("#item=")) {
+			if (history.state?.reader) {
+				history.back();
+				return;
+			}
+			history.replaceState({}, "", location.pathname + location.search);
+		}
+		const closedItemId = state.currentReaderId;
 		resetEpubReader();
 		revokeReaderBlobUrl();
 		readerApi.stopArticleProgressPoll?.();
@@ -258,7 +224,7 @@ export function initReader(app) {
 		readerApi.hideSelectionPopup?.();
 		readerApi.closeNoteModal?.();
 		unlockBackgroundScroll();
-		app.loadItems?.();
+		if (closedItemId) app.refreshReaderItem?.(closedItemId);
 	}
 
 	Object.assign(readerApi, {
@@ -268,9 +234,43 @@ export function initReader(app) {
 	});
 
 	app.openReader = openReader;
+	app.closeReader = closeReader;
+	async function syncHistory() {
+		const id = Number(new URLSearchParams(location.hash.slice(1)).get("item"));
+		if (!id) {
+			if (state.currentReaderId) closeReader({ fromHistory: true });
+			return;
+		}
+		if (state.currentReaderId === id) return;
+		let item = state.itemsById.get(id);
+		if (!item) {
+			const response = await fetch(`/api/items/${id}`).catch(() => null);
+			if (!response?.ok) return;
+			item = await response.json();
+			state.itemsById.set(id, item);
+		}
+		await openReader(item.id, item.url, item.title, item.type, {
+			fromHistory: true,
+		});
+	}
+	window.addEventListener("message", (event) => {
+		if (
+			event.origin === location.origin &&
+			event.source === state.readerIframe?.contentWindow &&
+			event.data?.type === "readinglist:page-rendered"
+		)
+			readerApi.scheduleApplyHighlightsToDocument?.();
+	});
+	window.addEventListener("popstate", () => {
+		void syncHistory();
+	});
+	window.addEventListener("reading:library-loaded", () => {
+		void syncHistory();
+	});
+
 	app.loadAllHighlights = readerApi.loadAllHighlights;
 
-	dom.readerClose?.addEventListener("click", closeReader);
+	dom.readerClose?.addEventListener("click", () => closeReader());
 	dom.readerToggleNotes?.addEventListener("click", () => {
 		setReaderSidebarOpen(dom.readerSidebar?.classList.contains("hidden"));
 	});

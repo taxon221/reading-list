@@ -1,3 +1,5 @@
+import { clearDraft, saveDraft } from "./drafts.js";
+import { showToast } from "./toast.js";
 import { createReaderHighlightUi } from "./reader-highlight-ui.js";
 import {
 	dom,
@@ -128,7 +130,14 @@ export function initReaderHighlights(app, readerApi) {
 			},
 		).catch(() => null);
 		if (response && handleAuthFailure(response)) return;
-		if (!response?.ok) return;
+		if (!response?.ok) {
+			await saveDraft();
+			showToast("Couldn't save your note. Your draft is kept on this device.", {
+				type: "error",
+			});
+			return;
+		}
+		void clearDraft();
 
 		highlightUi.closeNoteModal();
 		if (!editingHighlightId) {
