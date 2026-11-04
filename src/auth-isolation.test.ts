@@ -1479,13 +1479,11 @@ describe("auth and user isolation", () => {
 			await until(() =>
 				first.el("toast-container").textContent.includes("Offline"),
 			);
-			first.w.close();
 			const other = await open(secondUserEmail);
 			await until(() =>
 				other.el("items-list").textContent.includes("Your reading space"),
 			);
 			expect(other.el("add-modal").style.display).toBe("none");
-			other.w.close();
 			rejectSaves = false;
 			const restored = await open(bootstrapAdminEmail);
 			await until(() => restored.el("add-modal").style.display === "flex");
@@ -1511,6 +1509,11 @@ describe("auth and user isolation", () => {
 			);
 			expect(items).toHaveLength(1);
 			expect(items[0].tags).toEqual(["after-recovery", "original"]);
+			await until(
+				() =>
+					restored.el("tag-options").textContent.includes("after-recovery") &&
+					!!restored.el("items-list").querySelector(".item-title"),
+			);
 			for (const fixture of browsers) expect(fixture.errors).toEqual([]);
 		} finally {
 			for (const { w } of browsers) w.close();
