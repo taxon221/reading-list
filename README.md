@@ -179,8 +179,9 @@ bun run backup -- /path/to/private/reading-list-backup.zip
 This uses SQLite's consistent `VACUUM INTO` snapshot, then copies its referenced
 uploads. If an upload disappears during the backup, it fails rather than producing
 an incomplete archive. Pause writes for a backup while actively deleting files.
-To restore, stop the app, extract `reading-list.db` and `uploads/` into `DATA_DIR`
-(default `data/`), and restart. Keep full backups private: they include credentials.
+To restore, stop the app, delete any `reading-list.db-wal` and `reading-list.db-shm`
+files, extract `reading-list.db` and `uploads/` into `DATA_DIR` (default `data/`),
+and restart. Keep full backups private: they include credentials.
 Never restore a database over a running instance.
 
 The database alone does **not** include uploaded PDFs/EPUBs. Back up the whole data

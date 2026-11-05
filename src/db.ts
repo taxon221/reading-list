@@ -8,6 +8,11 @@ if (!existsSync(dataDir)) {
 }
 
 export const db = new Database(`${dataDir}/reading-list.db`);
+// WAL lets the RSS importer and backups run alongside the server without
+// blocking readers; the timeout waits out brief write locks instead of failing.
+db.exec("PRAGMA journal_mode = WAL");
+db.exec("PRAGMA synchronous = NORMAL");
+db.exec("PRAGMA busy_timeout = 5000");
 
 type TableColumn = {
 	name: string;
@@ -261,28 +266,28 @@ function migrateTagsTable(bootstrapAdminId: number) {
 
 function createIndexes() {
 	db.run(
-		"CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON user_preferences(user_id)",
-	);
-	db.run("CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id)");
-	db.run(
 		"CREATE INDEX IF NOT EXISTS idx_items_user_created_at ON items(user_id, created_at DESC, id DESC)",
 	);
-	db.run("CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id)");
 	db.run(
 		"CREATE INDEX IF NOT EXISTS idx_item_tags_tag_item ON item_tags(tag_id, item_id)",
 	);
 	db.run(
-		"CREATE INDEX IF NOT EXISTS idx_highlights_user_id ON highlights(user_id)",
-	);
-	db.run(
 		"CREATE INDEX IF NOT EXISTS idx_highlights_user_item ON highlights(user_id, item_id)",
 	);
+	// Deleting an item checks highlights by item_id for its foreign key.
 	db.run(
-		"CREATE INDEX IF NOT EXISTS idx_rss_subscriptions_user_id ON rss_subscriptions(user_id)",
+		"CREATE INDEX IF NOT EXISTS idx_highlights_item ON highlights(item_id)",
 	);
-	db.run(
-		"CREATE INDEX IF NOT EXISTS idx_rss_subscription_seen_subscription_id ON rss_subscription_seen(subscription_id)",
-	);
+	// Each of these duplicated a primary key or the leading column of another index.
+	for (const name of [
+		"idx_user_preferences_user_id",
+		"idx_items_user_id",
+		"idx_tags_user_id",
+		"idx_highlights_user_id",
+		"idx_rss_subscriptions_user_id",
+		"idx_rss_subscription_seen_subscription_id",
+	])
+		db.run(`DROP INDEX IF EXISTS ${name}`);
 }
 
 function syncItemsSchema(bootstrapAdminId: number) {

@@ -33,7 +33,7 @@ try {
 	}
 	zip.file(
 		"RESTORE.txt",
-		"Stop Reading List before restoring. Unzip reading-list.db and uploads/ into DATA_DIR, then restart. This backup includes authentication credentials: keep it private.\n",
+		"Stop Reading List before restoring. Delete any reading-list.db-wal and reading-list.db-shm files, unzip reading-list.db and uploads/ into DATA_DIR, then restart. This backup includes authentication credentials: keep it private.\n",
 	);
 	await mkdir(resolve(output, ".."), { recursive: true });
 	if (await Bun.file(output).exists())
