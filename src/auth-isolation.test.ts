@@ -214,6 +214,39 @@ describe("auth and user isolation", () => {
 		expect(item.notes).toBe("Keep this note");
 	});
 
+	test("answers malformed item bodies with 400 and treats null text as empty", async () => {
+		const send = (path: string, method: string, body: string) =>
+			api(
+				path,
+				{ method, headers: { "Content-Type": "application/json" }, body },
+				bootstrapAdminEmail,
+			);
+		expect((await send("/api/items", "POST", "{not json")).status).toBe(400);
+		const created = await send(
+			"/api/items",
+			"POST",
+			JSON.stringify({ url: "https://example.com/bodies", title: null }),
+		);
+		expect(created.status).toBe(201);
+		const { id } = (await created.json()) as { id: number };
+		expect((await send(`/api/items/${id}`, "PATCH", "[]")).status).toBe(400);
+		const patched = await send(
+			`/api/items/${id}`,
+			"PATCH",
+			JSON.stringify({ title: null, notes: null }),
+		);
+		expect(patched.status).toBe(200);
+		const item = await apiJson<{ title: string; notes: string }>(
+			`/api/items/${id}`,
+			{},
+			bootstrapAdminEmail,
+		);
+		expect(item).toMatchObject({ title: "", notes: "" });
+		expect(
+			(await send(`/api/items/${id}/highlights`, "POST", "null")).status,
+		).toBe(400);
+	});
+
 	test("rejects missing identities while auto-provisioning users and the bootstrap admin", async () => {
 		const missingIdentity = await api("/api/items");
 		expect(missingIdentity.status).toBe(401);

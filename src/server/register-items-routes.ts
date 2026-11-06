@@ -4,7 +4,7 @@ import {
 	findDuplicateItem,
 	savedType,
 } from "./article-store";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { db } from "../db";
 import { getCurrentUser } from "./auth";
 import { normalizeStoredPreviewImage } from "./content-utils";
@@ -20,6 +20,33 @@ import {
 	setUserSavedViews,
 } from "./item-store";
 import type { AppBindings, ItemRow } from "./types";
+
+type JsonObject = Record<string, unknown>;
+
+/** Reads a JSON object body, or null when the body is malformed or not an object. */
+async function readJsonObject(c: Context): Promise<JsonObject | null> {
+	const body: unknown = await c.req.json().catch(() => null);
+	return body && typeof body === "object" && !Array.isArray(body)
+		? (body as JsonObject)
+		: null;
+}
+
+const text = (value: unknown) =>
+	typeof value === "string" ? value : value == null ? "" : String(value);
+const invalidBody = { error: "Send a JSON object." };
+
+/**
+ * Tags are saved lowercased, but older imports may not be. SQLite's lower()
+ * only folds ASCII, so also match the exact names the client sent.
+ */
+function tagNameMatch(column: string, names: string[]) {
+	const lowered = names.map((name) => name.toLowerCase());
+	const placeholders = (list: string[]) => list.map(() => "?").join(",");
+	return {
+		sql: `(${column} IN (${placeholders(names)}) OR lower(${column}) IN (${placeholders(lowered)}))`,
+		params: [...names, ...lowered],
+	};
+}
 
 type ItemListRow = ItemRow & {
 	highlight_count: number;
@@ -60,10 +87,13 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		const excludeTagsParam = c.req.query("exclude_tags");
 		const typesParam = c.req.query("types");
 
-		const tags = tagsParam ? tagsParam.split(",").filter(Boolean) : [];
-		const excludeTags = excludeTagsParam
-			? excludeTagsParam.split(",").filter(Boolean)
-			: [];
+		const tagList = (value: string | undefined) =>
+			(value || "")
+				.split(",")
+				.map((tag) => tag.trim())
+				.filter(Boolean);
+		const tags = tagList(tagsParam);
+		const excludeTags = tagList(excludeTagsParam);
 		const types = typesParam ? typesParam.split(",").filter(Boolean) : [];
 
 		let query = `
@@ -97,29 +127,29 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		];
 
 		if (tags.length > 0) {
-			const placeholders = tags.map(() => "?").join(",");
+			const match = tagNameMatch("t.name", tags);
 			conditions.push(
 				`i.id IN (
           SELECT it.item_id FROM item_tags it
           JOIN tags t ON it.tag_id = t.id
-          WHERE t.user_id = ? AND t.name IN (${placeholders})
+          WHERE t.user_id = ? AND ${match.sql}
         )`,
 			);
 			params.push(currentUser.id);
-			params.push(...tags);
+			params.push(...match.params);
 		}
 
 		if (excludeTags.length > 0) {
-			const placeholders = excludeTags.map(() => "?").join(",");
+			const match = tagNameMatch("t.name", excludeTags);
 			conditions.push(
 				`i.id NOT IN (
           SELECT it.item_id FROM item_tags it
           JOIN tags t ON it.tag_id = t.id
-          WHERE t.user_id = ? AND t.name IN (${placeholders})
+          WHERE t.user_id = ? AND ${match.sql}
         )`,
 			);
 			params.push(currentUser.id);
-			params.push(...excludeTags);
+			params.push(...match.params);
 		}
 
 		if (types.length > 0) {
@@ -216,7 +246,7 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			notes,
 			preview_image,
 			reading_time_minutes,
-		} = await c.req.json();
+		} = (await readJsonObject(c)) ?? {};
 
 		const url = canonicalItemUrl(rawUrl);
 		if (!url)
@@ -229,28 +259,28 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			? Number(reading_time_minutes)
 			: null;
 
-		const result = db
-			.query(
-				"INSERT INTO items (user_id, url, title, author, type, notes, preview_image, reading_time_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			)
-			.run(
-				currentUser.id,
-				url,
-				title || "",
-				author || "",
-				savedType(url, type),
-				typeof notes === "string" ? notes : "",
-				previewImage,
-				readingTimeMinutes,
-			);
+		const itemId = db.transaction(() => {
+			const result = db
+				.query(
+					"INSERT INTO items (user_id, url, title, author, type, notes, preview_image, reading_time_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+				)
+				.run(
+					currentUser.id,
+					url,
+					text(title),
+					text(author),
+					savedType(url, type),
+					typeof notes === "string" ? notes : "",
+					previewImage,
+					readingTimeMinutes,
+				);
+			attachTagsToItem(result.lastInsertRowid, currentUser.id, tags);
+			return Number(result.lastInsertRowid);
+		})();
 
-		attachTagsToItem(result.lastInsertRowid, currentUser.id, tags);
 		if (Bun.env.ARTICLE_CAPTURE_ON_SAVE !== "false")
-			void enrichSavedItem(
-				currentUser.id,
-				Number(result.lastInsertRowid),
-			).catch(() => undefined);
-		return c.json({ id: result.lastInsertRowid, success: true }, 201);
+			void enrichSavedItem(currentUser.id, itemId).catch(() => undefined);
+		return c.json({ id: itemId, success: true }, 201);
 	});
 
 	app.get("/api/items/:id", (c) => {
@@ -265,47 +295,46 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 	app.patch("/api/items/:id", async (c) => {
 		const currentUser = getCurrentUser(c);
 		const id = c.req.param("id");
-		const body = await c.req.json();
+		const body = await readJsonObject(c);
+		if (!body) return c.json(invalidBody, 400);
 		const item = getOwnedItem(id, currentUser.id);
 
 		if (!item) return c.json({ error: "Item not found" }, 404);
 
-		if (body.is_read !== undefined) {
-			db.query("UPDATE items SET is_read = ? WHERE id = ? AND user_id = ?").run(
-				body.is_read ? 1 : 0,
-				id,
-				currentUser.id,
-			);
-		}
+		db.transaction(() => {
+			if (body.is_read !== undefined) {
+				db.query(
+					"UPDATE items SET is_read = ? WHERE id = ? AND user_id = ?",
+				).run(body.is_read ? 1 : 0, id, currentUser.id);
+			}
 
-		if (body.title !== undefined) {
-			db.query("UPDATE items SET title = ? WHERE id = ? AND user_id = ?").run(
-				body.title,
-				id,
-				currentUser.id,
-			);
-		}
+			if (body.title !== undefined) {
+				db.query("UPDATE items SET title = ? WHERE id = ? AND user_id = ?").run(
+					text(body.title),
+					id,
+					currentUser.id,
+				);
+			}
 
-		if (body.author !== undefined) {
-			db.query("UPDATE items SET author = ? WHERE id = ? AND user_id = ?").run(
-				body.author,
-				id,
-				currentUser.id,
-			);
-		}
+			if (body.author !== undefined) {
+				db.query(
+					"UPDATE items SET author = ? WHERE id = ? AND user_id = ?",
+				).run(text(body.author), id, currentUser.id);
+			}
 
-		if (body.notes !== undefined) {
-			db.query("UPDATE items SET notes = ? WHERE id = ? AND user_id = ?").run(
-				body.notes,
-				id,
-				currentUser.id,
-			);
-		}
+			if (body.notes !== undefined) {
+				db.query("UPDATE items SET notes = ? WHERE id = ? AND user_id = ?").run(
+					text(body.notes),
+					id,
+					currentUser.id,
+				);
+			}
 
-		if (body.tags !== undefined) {
-			db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
-			attachTagsToItem(id, currentUser.id, body.tags);
-		}
+			if (body.tags !== undefined) {
+				db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
+				attachTagsToItem(id, currentUser.id, body.tags);
+			}
+		})();
 
 		return c.json({ success: true });
 	});
@@ -315,9 +344,6 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		const id = c.req.param("id");
 		const body = await c.req.json().catch(() => ({}));
 		const progress = body?.progress;
-		const item = getOwnedItem(id, currentUser.id);
-
-		if (!item) return c.json({ error: "Item not found" }, 404);
 
 		let serialized = "";
 		if (progress && typeof progress === "object") {
@@ -327,18 +353,22 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 				serialized = "";
 			}
 		}
+		// Progress is a small position record (plus the article URL, up to 8 KB);
+		// it is sent with every list load.
+		if (serialized.length > 16384)
+			return c.json({ error: "Progress is too large" }, 400);
 
-		db.query(
-			"UPDATE items SET reading_progress = ? WHERE id = ? AND user_id = ?",
-		).run(serialized, id, currentUser.id);
-
-		const autoMarkedRead = shouldAutoMarkRead(progress);
-		if (autoMarkedRead) {
-			db.query("UPDATE items SET is_read = 1 WHERE id = ? AND user_id = ?").run(
+		const result = db
+			.query(
+				"UPDATE items SET reading_progress = ?, is_read = CASE WHEN ? THEN 1 ELSE is_read END WHERE id = ? AND user_id = ?",
+			)
+			.run(
+				serialized,
+				shouldAutoMarkRead(progress) ? 1 : 0,
 				id,
 				currentUser.id,
 			);
-		}
+		if (result.changes === 0) return c.json({ error: "Item not found" }, 404);
 
 		return c.json({ success: true });
 	});
@@ -355,16 +385,12 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			notes,
 			preview_image,
 			reading_time_minutes,
-		} = await c.req.json();
-		const existingItem = getOwnedItem(id, currentUser.id) as {
-			url: string;
-			author: string;
-			preview_image: string;
-			reading_time_minutes: number | null;
-		} | null;
+		} = (await readJsonObject(c)) ?? {};
+		const existingItem = getOwnedItem(id, currentUser.id);
 
 		if (!existingItem) return c.json({ error: "Item not found" }, 404);
-		if (!url) return c.json({ error: "URL is required" }, 400);
+		if (typeof url !== "string" || !url)
+			return c.json({ error: "URL is required" }, 400);
 
 		if (!String(url).startsWith("/uploads/") && !canonicalItemUrl(url))
 			return c.json({ error: "Enter an HTTP or HTTPS URL." }, 400);
@@ -378,10 +404,8 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			return c.json({ error: "Uploaded file URL cannot be changed" }, 400);
 		}
 
-		if (existingItem.url !== url)
-			db.query("DELETE FROM article_snapshots WHERE item_id=?").run(id);
 		const nextAuthor =
-			author !== undefined ? String(author || "") : existingItem.author || "";
+			author !== undefined ? text(author) : existingItem.author || "";
 		const nextPreviewImage =
 			normalizeStoredPreviewImage(preview_image) ||
 			(url === existingItem.url ? existingItem.preview_image : "");
@@ -391,26 +415,29 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 				? null
 				: existingItem.reading_time_minutes;
 
-		db.query(
-			"UPDATE items SET url = ?, title = ?, author = ?, type = ?, preview_image = ?, reading_time_minutes = ?, notes = ? WHERE id = ? AND user_id = ?",
-		).run(
-			url,
-			title || "",
-			nextAuthor,
-			type || "article",
-			nextPreviewImage,
-			nextReadingTimeMinutes,
-			notes || "",
-			id,
-			currentUser.id,
-		);
-
-		db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
-		attachTagsToItem(id, currentUser.id, tags);
-		if (upload && url !== existingItem.url) {
-			db.query("DELETE FROM uploaded_files WHERE item_id = ?").run(id);
-			removeUploadedFile(upload.filename);
-		}
+		const urlChanged = existingItem.url !== url;
+		db.transaction(() => {
+			if (urlChanged)
+				db.query("DELETE FROM article_snapshots WHERE item_id=?").run(id);
+			db.query(
+				"UPDATE items SET url = ?, title = ?, author = ?, type = ?, preview_image = ?, reading_time_minutes = ?, notes = ? WHERE id = ? AND user_id = ?",
+			).run(
+				url,
+				text(title),
+				nextAuthor,
+				type === undefined ? existingItem.type : savedType(url, type),
+				nextPreviewImage,
+				nextReadingTimeMinutes,
+				text(notes),
+				id,
+				currentUser.id,
+			);
+			db.query("DELETE FROM item_tags WHERE item_id = ?").run(id);
+			attachTagsToItem(id, currentUser.id, tags);
+			if (upload && urlChanged)
+				db.query("DELETE FROM uploaded_files WHERE item_id = ?").run(id);
+		})();
+		if (upload && urlChanged) removeUploadedFile(upload.filename);
 
 		return c.json({ success: true });
 	});
@@ -431,17 +458,17 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		let ids: number[] = [];
 
 		if (by === "tag") {
-			const placeholders = values.map(() => "?").join(",");
+			const match = tagNameMatch("t.name", values);
 			const rows = db
 				.query(
 					`
             SELECT DISTINCT i.id AS id FROM items i
             INNER JOIN item_tags it ON it.item_id = i.id
             INNER JOIN tags t ON t.id = it.tag_id AND t.user_id = i.user_id
-            WHERE i.user_id = ? AND t.name IN (${placeholders})
+            WHERE i.user_id = ? AND ${match.sql}
           `,
 				)
-				.all(currentUser.id, ...values) as { id: number }[];
+				.all(currentUser.id, ...match.params) as { id: number }[];
 			ids = rows.map((row) => row.id);
 		} else if (by === "author") {
 			const normalizedValues = values.map((value) => value.toLowerCase());
@@ -510,7 +537,9 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 		if (!Number.isFinite(numericId)) {
 			return c.json({ error: "Item not found" }, 404);
 		}
-		const upload = deleteOwnedItem(currentUser, numericId);
+		const upload = db.transaction(() =>
+			deleteOwnedItem(currentUser, numericId),
+		)();
 		if (upload === false) {
 			return c.json({ error: "Item not found" }, 404);
 		}
@@ -550,9 +579,9 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 	app.post("/api/items/:id/highlights", async (c) => {
 		const currentUser = getCurrentUser(c);
 		const itemId = c.req.param("id");
-		const { selected_text, note } = await c.req.json();
+		const { selected_text, note } = (await readJsonObject(c)) ?? {};
 
-		if (!selected_text) {
+		if (typeof selected_text !== "string" || !selected_text.trim()) {
 			return c.json({ error: "Selected text is required" }, 400);
 		}
 
@@ -563,7 +592,7 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 			.query(
 				"INSERT INTO highlights (user_id, item_id, selected_text, note) VALUES (?, ?, ?, ?)",
 			)
-			.run(currentUser.id, itemId, selected_text, note || "");
+			.run(currentUser.id, itemId, selected_text, text(note));
 
 		return c.json(
 			getOwnedHighlight(result.lastInsertRowid, currentUser.id),
@@ -574,13 +603,15 @@ export function registerItemRoutes(app: Hono<AppBindings>) {
 	app.patch("/api/highlights/:id", async (c) => {
 		const currentUser = getCurrentUser(c);
 		const id = c.req.param("id");
-		const { note } = await c.req.json();
+		const body = await readJsonObject(c);
+		if (!body) return c.json(invalidBody, 400);
+		const { note } = body;
 		const highlight = getOwnedHighlight(id, currentUser.id);
 
 		if (!highlight) return c.json({ error: "Highlight not found" }, 404);
 
 		db.query("UPDATE highlights SET note = ? WHERE id = ? AND user_id = ?").run(
-			note || "",
+			text(note),
 			id,
 			currentUser.id,
 		);
