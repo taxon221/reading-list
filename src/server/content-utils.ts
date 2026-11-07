@@ -400,10 +400,16 @@ export function extractArticleContent(html: string, sourceUrl: string) {
 }
 
 function isPrivateIpAddress(address: string): boolean {
-	const normalized = address
-		.toLowerCase()
-		.replace(/^\[|\]$/g, "")
-		.replace(/^::ffff:/, "");
+	let normalized = address.toLowerCase().replace(/^\[|\]$/g, "");
+	// URL parsing rewrites [::ffff:127.0.0.1] to ::ffff:7f00:1; unwrap both forms.
+	const mappedHex = normalized.match(
+		/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/,
+	);
+	if (mappedHex) {
+		const [high, low] = mappedHex.slice(1).map((part) => parseInt(part, 16));
+		normalized = [high >> 8, high & 255, low >> 8, low & 255].join(".");
+	}
+	normalized = normalized.replace(/^::ffff:/, "");
 	const version = isIP(normalized);
 
 	if (version === 4) {

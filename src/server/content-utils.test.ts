@@ -18,6 +18,10 @@ describe("article metadata parsing", () => {
 	test("rejects private remote targets", async () => {
 		expect(await getSafeRemoteUrl("http://127.0.0.1/private")).toBeNull();
 		expect(
+			await getSafeRemoteUrl("http://[::ffff:127.0.0.1]/private"),
+		).toBeNull();
+		expect(await getSafeRemoteUrl("http://[::ffff:a00:1]/private")).toBeNull();
+		expect(
 			await getSafeRemoteUrl("https://user:pass@example.com/private"),
 		).toBeNull();
 	});
