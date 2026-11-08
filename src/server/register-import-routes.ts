@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { db } from "../db";
+import { canonicalItemUrl, findDuplicateItem } from "./article-store";
 import { getCurrentUser } from "./auth";
 import { detectType, getFallbackTitle } from "./content-utils";
 import {
@@ -86,28 +87,17 @@ export function registerImportRoutes(app: Hono<AppBindings>) {
 			const insertItem = db.query(
 				"INSERT INTO items (user_id, url, title, author, type, created_at) VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))",
 			);
-			const existingItem = db.query(
-				"SELECT id FROM items WHERE user_id = ? AND url = ?",
-			);
 
 			const importTx = db.transaction((dataRows: string[][]) => {
 				for (const row of dataRows) {
 					try {
-						const url = row[urlIndex]?.trim();
+						const url = canonicalItemUrl(row[urlIndex]);
 						if (!url) {
 							skipped++;
 							continue;
 						}
 
-						if (seen.has(url)) {
-							duplicate++;
-							continue;
-						}
-
-						const existing = existingItem.get(currentUser.id, url) as
-							| { id: number }
-							| undefined;
-						if (existing?.id) {
+						if (seen.has(url) || findDuplicateItem(currentUser.id, url)) {
 							duplicate++;
 							continue;
 						}

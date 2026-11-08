@@ -3,16 +3,35 @@ import { isIP } from "node:net";
 import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
 
-function decodeHtmlEntities(text: string): string {
-	return text
-		.replace(/&amp;/g, "&")
-		.replace(/&lt;/g, "<")
-		.replace(/&gt;/g, ">")
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'")
-		.replace(/&apos;/g, "'")
-		.replace(/&#x27;/g, "'")
-		.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)));
+const namedEntities: Record<string, string> = {
+	amp: "&",
+	lt: "<",
+	gt: ">",
+	quot: '"',
+	apos: "'",
+	nbsp: "\u00a0",
+	ndash: "\u2013",
+	mdash: "\u2014",
+	hellip: "\u2026",
+	lsquo: "\u2018",
+	rsquo: "\u2019",
+	ldquo: "\u201c",
+	rdquo: "\u201d",
+};
+
+/** Decodes entities in one pass, so "&amp;lt;" stays "&lt;" and emoji survive. */
+export function decodeHtmlEntities(text: string): string {
+	return text.replace(
+		/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
+		(entity, name: string) => {
+			if (name[0] !== "#") return namedEntities[name.toLowerCase()] ?? entity;
+			const code =
+				name[1] === "x" || name[1] === "X"
+					? parseInt(name.slice(2), 16)
+					: parseInt(name.slice(1), 10);
+			return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+		},
+	);
 }
 
 export function detectType(url: string, contentType?: string): string {

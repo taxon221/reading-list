@@ -1,5 +1,10 @@
 import { db } from "../db";
-import { readResponseText, withRemoteResponse } from "./content-utils";
+import {
+	decodeHtmlEntities,
+	readResponseText,
+	withRemoteResponse,
+} from "./content-utils";
+import { canonicalItemUrl, findDuplicateItem } from "./article-store";
 import { attachTagsToItem } from "./item-store";
 
 export type RssSubscriptionRow = {
@@ -36,15 +41,15 @@ export type RssImportResult = {
 const DEFAULT_RSS_TAGS = ["Newsletter", "rss"];
 
 function decodeXml(value: string): string {
+	// CDATA sections are literal text; only decode entities outside them.
 	return value
-		.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-		.replace(/&amp;/g, "&")
-		.replace(/&lt;/g, "<")
-		.replace(/&gt;/g, ">")
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'")
-		.replace(/&#x27;/g, "'")
-		.replace(/&#x2F;/g, "/")
+		.split(/(<!\[CDATA\[[\s\S]*?\]\]>)/)
+		.map((part) =>
+			part.startsWith("<![CDATA[")
+				? part.slice(9, -3)
+				: decodeHtmlEntities(part),
+		)
+		.join("")
 		.trim();
 }
 
@@ -111,12 +116,6 @@ async function fetchFeed(feedUrl: string): Promise<ParsedFeed> {
 	return feed;
 }
 
-function itemExistsForUser(userId: number, url: string): boolean {
-	return !!db
-		.query("SELECT id FROM items WHERE user_id = ? AND url = ? LIMIT 1")
-		.get(userId, url);
-}
-
 function seenEntryExists(subscriptionId: number, externalId: string): boolean {
 	return !!db
 		.query(
@@ -157,31 +156,35 @@ export async function importRssSubscription(
 	const insertItem = db.query(
 		"INSERT INTO items (user_id, url, title, author, type) VALUES (?, ?, ?, ?, 'article')",
 	);
-	const importItem = db.transaction((feedItem: ParsedFeedItem) => {
+	const importItem = (feedItem: ParsedFeedItem) => {
 		insertSeen.run(subscription.id, feedItem.externalId, feedItem.publishedAt);
-		if (itemExistsForUser(subscription.user_id, feedItem.url)) return false;
+		// Feeds often append tracking parameters; skip links already saved.
+		const url = canonicalItemUrl(feedItem.url);
+		if (!url || findDuplicateItem(subscription.user_id, url)) return false;
 
 		const result = insertItem.run(
 			subscription.user_id,
-			feedItem.url,
+			url,
 			feedItem.title,
 			feedItem.author,
 		);
 		attachTagsToItem(result.lastInsertRowid, subscription.user_id, DEFAULT_RSS_TAGS);
 		return true;
-	});
+	};
 
-	for (const feedItem of feed.items) {
-		if (seenEntryExists(subscription.id, feedItem.externalId)) {
-			skipped += 1;
-			continue;
+	db.transaction(() => {
+		for (const feedItem of feed.items) {
+			if (seenEntryExists(subscription.id, feedItem.externalId)) {
+				skipped += 1;
+				continue;
+			}
+			if (importItem(feedItem)) {
+				imported += 1;
+			} else {
+				skipped += 1;
+			}
 		}
-		if (importItem(feedItem)) {
-			imported += 1;
-		} else {
-			skipped += 1;
-		}
-	}
+	})();
 
 	db.query(
 		"UPDATE rss_subscriptions SET title = COALESCE(NULLIF(title, ''), ?), site_url = COALESCE(NULLIF(site_url, ''), ?), last_checked_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",

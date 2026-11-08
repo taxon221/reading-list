@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { getSafeRemoteUrl, parseTitle } from "./content-utils";
+import {
+	decodeHtmlEntities,
+	getSafeRemoteUrl,
+	parseTitle,
+} from "./content-utils";
 
 describe("article metadata parsing", () => {
 	test("prefers an article heading over a site-decorated document title", () => {
@@ -24,5 +28,17 @@ describe("article metadata parsing", () => {
 		expect(
 			await getSafeRemoteUrl("https://user:pass@example.com/private"),
 		).toBeNull();
+	});
+
+	test("decodes entities once, including hex, emoji and typographic names", () => {
+		expect(decodeHtmlEntities("Tom &amp;amp; Jerry &amp;lt;3")).toBe(
+			"Tom &amp; Jerry &lt;3",
+		);
+		expect(decodeHtmlEntities("Ship it &#x1F680; &#128640;")).toBe(
+			"Ship it \u{1F680} \u{1F680}",
+		);
+		expect(decodeHtmlEntities("A &ndash; B&hellip; &rsquo;s &unknown;")).toBe(
+			"A \u2013 B\u2026 \u2019s &unknown;",
+		);
 	});
 });

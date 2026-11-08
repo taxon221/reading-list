@@ -69,8 +69,9 @@ export function registerRssRoutes(app: Hono<AppBindings>) {
 			});
 		}
 
+		// A double-click can race the existence check above.
 		db.query(
-			`INSERT INTO rss_subscriptions (user_id, title, feed_url, site_url)
+			`INSERT OR IGNORE INTO rss_subscriptions (user_id, title, feed_url, site_url)
 			 VALUES (?, '', ?, '')`,
 		).run(currentUser.id, feedUrl);
 
@@ -106,7 +107,17 @@ export function registerRssRoutes(app: Hono<AppBindings>) {
 		const subscription = getOwnedSubscription(c.req.param("id"), currentUser.id);
 		if (!subscription) return c.json({ error: "Subscription not found" }, 404);
 
-		return c.json(await importRssSubscription(subscription));
+		try {
+			return c.json(await importRssSubscription(subscription));
+		} catch (error) {
+			return c.json(
+				{
+					error:
+						error instanceof Error ? error.message : "RSS feed could not be loaded",
+				},
+				502,
+			);
+		}
 	});
 
 	app.post("/api/rss-subscriptions/import", async (c) => {
