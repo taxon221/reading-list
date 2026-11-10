@@ -29,7 +29,9 @@ try {
 			throw new Error(
 				`Upload ${filename} is missing. Pause writes and retry the backup.`,
 			);
-		zip.file(`uploads/${filename}`, await file.arrayBuffer());
+		zip.file(`uploads/${filename}`, await file.arrayBuffer(), {
+			compression: "STORE",
+		});
 	}
 	zip.file(
 		"RESTORE.txt",

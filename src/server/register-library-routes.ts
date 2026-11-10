@@ -6,7 +6,6 @@ import { getCurrentUser } from "./auth";
 import { readBoundedBytes, withRemoteResponse } from "./content-utils";
 import {
 	getOwnedItem,
-	getItemTags,
 	getUserSavedViews,
 	getOwnedUploadFile,
 } from "./item-store";
@@ -92,11 +91,21 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 	});
 	app.get("/api/export", async (c) => {
 		const user = getCurrentUser(c);
+		const itemTags = new Map<number, string[]>();
+		for (const row of db
+			.query(
+				"SELECT it.item_id, t.name FROM item_tags it JOIN tags t ON t.id=it.tag_id WHERE t.user_id=? ORDER BY t.name",
+			)
+			.all(user.id) as { item_id: number; name: string }[]) {
+			const names = itemTags.get(row.item_id) ?? [];
+			names.push(row.name);
+			itemTags.set(row.item_id, names);
+		}
 		const items = (
 			db
 				.query("SELECT * FROM items WHERE user_id=? ORDER BY id")
 				.all(user.id) as ItemRow[]
-		).map((item) => ({ ...item, tags: getItemTags(item.id, user.id) }));
+		).map((item) => ({ ...item, tags: itemTags.get(item.id) ?? [] }));
 		const highlights = db
 			.query("SELECT * FROM highlights WHERE user_id=? ORDER BY item_id,id")
 			.all(user.id) as {
@@ -104,6 +113,25 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 			selected_text: string;
 			note: string;
 		}[];
+		if (c.req.query("format") === "highlights") {
+			const quotesByItem = Map.groupBy(highlights, (h) => h.item_id);
+			const text = items
+				.map((item) => {
+					const quotes = quotesByItem.get(item.id) ?? [];
+					return quotes.length || item.notes
+						? `# ${item.title || item.url}\n\n${item.url}\n\n${item.notes}\n\n${quotes.map((h) => `> ${h.selected_text.replaceAll("\n", "\n> ")}\n\n${h.note}`).join("\n\n")}`
+						: "";
+				})
+				.filter(Boolean)
+				.join("\n\n---\n\n");
+			return new Response(text, {
+				headers: {
+					"Content-Type": "text/markdown; charset=utf-8",
+					"Content-Disposition":
+						'attachment; filename="reading-list-highlights.md"',
+				},
+			});
+		}
 		const tags = db
 			.query("SELECT id,name FROM tags WHERE user_id=? ORDER BY name")
 			.all(user.id);
@@ -120,24 +148,6 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 				"SELECT s.* FROM article_snapshots s JOIN items i ON i.id=s.item_id WHERE i.user_id=?",
 			)
 			.all(user.id);
-		if (c.req.query("format") === "highlights") {
-			const text = items
-				.map((item) => {
-					const quotes = highlights.filter((h) => h.item_id === item.id);
-					return quotes.length || item.notes
-						? `# ${item.title || item.url}\n\n${item.url}\n\n${item.notes}\n\n${quotes.map((h) => `> ${h.selected_text.replaceAll("\n", "\n> ")}\n\n${h.note}`).join("\n\n")}`
-						: "";
-				})
-				.filter(Boolean)
-				.join("\n\n---\n\n");
-			return new Response(text, {
-				headers: {
-					"Content-Type": "text/markdown; charset=utf-8",
-					"Content-Disposition":
-						'attachment; filename="reading-list-highlights.md"',
-				},
-			});
-		}
 		const zip = new JSZip();
 		zip.file(
 			"library.json",
@@ -183,7 +193,10 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 					},
 					413,
 				);
-			zip.file(`uploads/${row.filename}`, await file.arrayBuffer());
+			// PDFs and EPUBs are already compressed; deflating them only costs time.
+			zip.file(`uploads/${row.filename}`, await file.arrayBuffer(), {
+				compression: "STORE",
+			});
 		}
 		const media = db
 			.query("SELECT url,content_type,body FROM media_cache WHERE user_id=?")
@@ -193,7 +206,7 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 			body: Uint8Array;
 		}[];
 		const manifest = media.map((m, i) => {
-			zip.file(`media/${i}`, m.body);
+			zip.file(`media/${i}`, m.body, { compression: "STORE" });
 			return { url: m.url, contentType: m.content_type, path: `media/${i}` };
 		});
 		zip.file("media.json", JSON.stringify(manifest, null, 2));
@@ -202,9 +215,11 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 			"Reading List portable export\nLibrary data, notes, highlights, feeds, saved views, and article snapshots are in library.json.\nUploaded files are in uploads/. Cached article images are listed in media.json.\nAuthentication credentials are deliberately excluded.\n",
 		);
 		return new Response(
-			new Uint8Array(
-				await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" }),
-			),
+			// JSZip allocates a plain ArrayBuffer; avoid copying a large archive.
+			(await zip.generateAsync({
+				type: "uint8array",
+				compression: "DEFLATE",
+			})) as Uint8Array<ArrayBuffer>,
 			{
 				headers: {
 					"Content-Type": "application/zip",

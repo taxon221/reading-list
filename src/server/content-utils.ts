@@ -77,7 +77,24 @@ export function detectType(url: string, contentType?: string): string {
 	return "article";
 }
 
-export function parseTitle(html: string): string | null {
+type DocumentSource = () => Document;
+
+/** Parses the HTML into a DOM on first use, so several readers can share it. */
+function htmlDocumentSource(html: string, url?: string): DocumentSource {
+	let document: Document | undefined;
+	return () => {
+		document ??= new JSDOM(html, {
+			...(url ? { url } : {}),
+			virtualConsole: new VirtualConsole(),
+		}).window.document;
+		return document;
+	};
+}
+
+export function parseTitle(
+	html: string,
+	getDocument: DocumentSource = htmlDocumentSource(html),
+): string | null {
 	const ogMatch = html.match(
 		/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i,
 	);
@@ -98,9 +115,7 @@ export function parseTitle(html: string): string | null {
 	);
 	if (twitterMatchAlt) return decodeHtmlEntities(twitterMatchAlt[1].trim());
 
-	const virtualConsole = new VirtualConsole();
-	const dom = new JSDOM(html, { virtualConsole });
-	const articleHeading = dom.window.document
+	const articleHeading = getDocument()
 		.querySelector(
 			'h1.entry-title, h1.post-title, [itemprop="headline"], article h1, main h1',
 		)
@@ -114,8 +129,11 @@ export function parseTitle(html: string): string | null {
 	return null;
 }
 
-export function parseAuthor(html: string): string | null {
-	const title = parseTitle(html);
+export function parseAuthor(
+	html: string,
+	getDocument: DocumentSource = htmlDocumentSource(html),
+	title: string | null = parseTitle(html, getDocument),
+): string | null {
 	const patterns = [
 		/<meta[^>]*name=["']author["'][^>]*content=["']([^"']+)["']/i,
 		/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']author["']/i,
@@ -134,9 +152,7 @@ export function parseAuthor(html: string): string | null {
 		}
 	}
 
-	const virtualConsole = new VirtualConsole();
-	const dom = new JSDOM(html, { virtualConsole });
-	const authorLink = dom.window.document.querySelector(
+	const authorLink = getDocument().querySelector(
 		'a[rel~="author"], a[href*="/author/"], a[href*="/authors/"]',
 	);
 	const author = authorLink?.textContent?.trim();
@@ -211,10 +227,9 @@ function getPreviewImageCandidateValue(
 export function parsePreviewImage(
 	html: string,
 	sourceUrl: string,
+	getDocument: DocumentSource = htmlDocumentSource(html, sourceUrl),
 ): string | null {
-	const virtualConsole = new VirtualConsole();
-	const dom = new JSDOM(html, { url: sourceUrl, virtualConsole });
-	const { document } = dom.window;
+	const document = getDocument();
 
 	const prioritizedSelectors = [
 		'meta[property="og:image:secure_url"]',
@@ -325,9 +340,10 @@ export async function fetchRemoteMetadata(
 					contentType.includes("application/xhtml")
 				) {
 					const html = await readResponseText(response);
-					title = parseTitle(html);
-					author = parseAuthor(html);
-					image = parsePreviewImage(html, finalUrl);
+					const getDocument = htmlDocumentSource(html, finalUrl);
+					title = parseTitle(html, getDocument);
+					author = parseAuthor(html, getDocument, title);
+					image = parsePreviewImage(html, finalUrl, getDocument);
 					if (type === "article") {
 						readingTimeMinutes = estimateReadingTimeMinutes(html, finalUrl);
 					}
@@ -385,9 +401,11 @@ function buildArticleContentFallback(html: string, sourceUrl: string) {
 		absolutizeDocumentUrls(document, new URL(sourceUrl));
 	} catch {}
 
+	const getOriginal = htmlDocumentSource(html);
+	const title = parseTitle(html, getOriginal);
 	return {
-		title: parseTitle(html) || fallbackTitle(sourceUrl),
-		byline: parseAuthor(html) || "",
+		title: title || fallbackTitle(sourceUrl),
+		byline: parseAuthor(html, getOriginal, title) || "",
 		excerpt: "",
 		content: document.body?.innerHTML?.trim() || "",
 	};

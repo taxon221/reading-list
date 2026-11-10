@@ -27,16 +27,17 @@ export function sessionId(c: AppContext) {
 export function sessionUser(c: AppContext): CurrentUser | null {
 	const id = sessionId(c);
 	if (!id) return null;
-	const user = db
+	const now = Date.now();
+	const row = db
 		.query(
-			`SELECT u.* FROM users u JOIN auth_sessions s ON s.user_id=u.id WHERE s.id=? AND s.expires_at>?`,
+			`SELECT u.*, s.last_seen_at AS session_last_seen_at FROM users u JOIN auth_sessions s ON s.user_id=u.id WHERE s.id=? AND s.expires_at>?`,
 		)
-		.get(id, Date.now()) as CurrentUser | null;
-	if (user)
-		db.query("UPDATE auth_sessions SET last_seen_at=? WHERE id=?").run(
-			Date.now(),
-			id,
-		);
+		.get(id, now) as (CurrentUser & { session_last_seen_at: number }) | null;
+	if (!row) return null;
+	const { session_last_seen_at: lastSeenAt, ...user } = row;
+	// Device lists only need minute precision; skip a write on every request.
+	if (lastSeenAt < now - 60_000)
+		db.query("UPDATE auth_sessions SET last_seen_at=? WHERE id=?").run(now, id);
 	return user;
 }
 export function isRecentSession(c: AppContext) {
