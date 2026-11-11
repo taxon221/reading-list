@@ -9,7 +9,12 @@ import {
 } from "./reader-display.js";
 import { getReaderFontSize } from "./reader-font.js";
 import { dom, state } from "./shared.js";
-import { clampProgressRatio, isMobileViewport, withTimeout } from "./utils.js";
+import {
+	clampProgressRatio,
+	isMobileViewport,
+	loadScript,
+	withTimeout,
+} from "./utils.js";
 
 const EPUB_BODY_FONT =
 	'"Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif';
@@ -47,7 +52,18 @@ export function handleEpubPageKey(event) {
 	return true;
 }
 
+// The EPUB engine is large and only needed here, so load it on first use.
+async function loadEpubEngine() {
+	if (typeof window.JSZip !== "function")
+		await loadScript("/static/vendor/jszip.min.js");
+	if (typeof window.ePub !== "function")
+		await loadScript("/static/vendor/epub.min.js");
+}
+
 export async function openEpubReader(itemUrl, readerApi) {
+	const readerId = state.currentReaderId;
+	await loadEpubEngine().catch(() => undefined);
+	if (state.currentReaderId !== readerId) return;
 	const epubFactory = window.ePub;
 	if (typeof epubFactory !== "function") {
 		showReaderError(itemUrl, "EPUB reader failed to load.");

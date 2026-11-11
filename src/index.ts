@@ -1,8 +1,9 @@
 import { registerLibraryRoutes } from "./server/register-library-routes";
 import { registerAuthRoutes } from "./server/register-auth-routes";
 import { HTTPException } from "hono/http-exception";
-import { Hono } from "hono";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { serveStatic } from "hono/bun";
+import { compress } from "hono/compress";
 import { csrf } from "hono/csrf";
 import { secureHeaders } from "hono/secure-headers";
 import { initDb } from "./db";
@@ -51,6 +52,7 @@ app.use("/api/*", (c, next) => {
 	if (!c.req.header("origin") && !c.req.header("sec-fetch-site")) return next();
 	return protectBrowserForms(c, next);
 });
+app.use("/*", compress());
 app.use("/*", async (c, next) => {
 	await next();
 
@@ -59,23 +61,52 @@ app.use("/*", async (c, next) => {
 		path.startsWith("/api/") ||
 		path === "/sw.js" ||
 		path === "/" ||
-		path === "/share-target" ||
-		path === "/manifest.webmanifest" ||
-		path === "/pdf-reader.html" ||
-		path.endsWith(".js") ||
-		path.endsWith(".css")
+		path === "/share-target"
 	) {
-		c.header("Cache-Control", "no-store, max-age=0");
+		// Routes such as /api/image choose their own private caching.
+		if (!c.res.headers.has("Cache-Control"))
+			c.header("Cache-Control", "no-store, max-age=0");
 		c.header("CDN-Cache-Control", "no-store");
 	}
 });
 
-app.use("/static/*", serveStatic({ root: "./public" }));
+// Static files keep their URLs across releases, so browsers store them but
+// revalidate each use; unchanged files answer with an empty 304.
+const revalidateStatic: MiddlewareHandler = async (c, next) => {
+	await next();
+	const etag = c.res.headers.get("ETag");
+	if (c.res.status !== 200 || !etag) return;
+	c.header("Cache-Control", "no-cache");
+	c.header("CDN-Cache-Control", "no-store");
+	const ifNoneMatch = c.req.header("If-None-Match");
+	if (ifNoneMatch?.split(",").some((tag) => tag.trim() === etag))
+		c.res = new Response(null, { status: 304, headers: c.res.headers });
+};
+const staticOptions = {
+	onFound(path: string, c: Context) {
+		const file = Bun.file(path);
+		c.header(
+			"ETag",
+			`W/"${file.size.toString(36)}-${Math.trunc(file.lastModified).toString(36)}"`,
+		);
+	},
+};
+
+app.use(
+	"/static/*",
+	revalidateStatic,
+	serveStatic({ root: "./public", ...staticOptions }),
+);
 app.get(
 	"/manifest.webmanifest",
-	serveStatic({ path: "./public/manifest.webmanifest" }),
+	revalidateStatic,
+	serveStatic({ path: "./public/manifest.webmanifest", ...staticOptions }),
 );
-app.get("/pdf-reader.html", serveStatic({ path: "./public/pdf-reader.html" }));
+app.get(
+	"/pdf-reader.html",
+	revalidateStatic,
+	serveStatic({ path: "./public/pdf-reader.html", ...staticOptions }),
+);
 app.get("/sw.js", serveStatic({ path: "./public/sw.js" }));
 app.get("/", (c) => c.html(indexPage));
 

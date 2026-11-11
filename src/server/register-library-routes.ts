@@ -29,6 +29,12 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 	});
 	app.get("/api/image", async (c) => {
 		const user = getCurrentUser(c);
+		// Sites without an icon or preview would otherwise be refetched on every
+		// visit. Timeouts and server errors may pass, so don't remember those.
+		const missing = (transient = false) =>
+			c.body(null, 404, {
+				"Cache-Control": transient ? "no-store" : "private, max-age=3600",
+			});
 		const url = c.req.query("url") || "";
 		if (url.length > 8192) return c.body(null, 400);
 		const cached = db
@@ -51,6 +57,8 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 				async (response) => {
 					const type =
 						(response.headers.get("content-type") || "").split(";")[0] || "";
+					if (response.status >= 500 || response.status === 429)
+						return missing(true);
 					if (
 						!response.ok ||
 						![
@@ -63,7 +71,7 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 							"image/avif",
 						].includes(type)
 					)
-						return c.body(null, 404);
+						return missing();
 					const body = await readBoundedBytes(response, 2 * 1024 * 1024);
 					db.query("INSERT OR REPLACE INTO media_cache VALUES (?,?,?,?,?)").run(
 						user.id,
@@ -84,9 +92,9 @@ export function registerLibraryRoutes(app: Hono<AppBindings>) {
 					});
 				},
 			);
-			return result || c.body(null, 404);
+			return result || missing();
 		} catch {
-			return c.body(null, 404);
+			return missing(true);
 		}
 	});
 	app.get("/api/export", async (c) => {

@@ -231,9 +231,7 @@ export function renderIndexOverlays() {
       </div>
     </div>
 <div id="recovered-note" hidden><p>Your unfinished note was recovered.</p><textarea aria-label="Recovered note"></textarea><button type="button" id="restore-note">Continue editing</button></div>
-<script src="/static/vendor/webauthn.js"></script>
-    <script src="/static/vendor/jszip.min.js"></script>
-    <script src="/static/vendor/epub.min.js"></script>
+<script src="/static/vendor/webauthn.js" defer></script>
     <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
     <script type="module" src="/static/app.js"></script>`;
 }

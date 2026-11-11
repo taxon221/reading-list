@@ -19,6 +19,27 @@ export async function withTimeout(promise, ms, message) {
 	}
 }
 
+const scriptLoads = new Map();
+
+/** Loads a classic script once; later calls share the same promise. */
+export function loadScript(src) {
+	if (!scriptLoads.has(src)) {
+		const load = new Promise((resolve, reject) => {
+			const script = document.createElement("script");
+			script.src = src;
+			script.onload = () => resolve();
+			script.onerror = () => {
+				scriptLoads.delete(src);
+				script.remove();
+				reject(new Error(`Could not load ${src}`));
+			};
+			document.head.append(script);
+		});
+		scriptLoads.set(src, load);
+	}
+	return scriptLoads.get(src);
+}
+
 export function isValidUrl(value) {
 	return URL.canParse(value);
 }
