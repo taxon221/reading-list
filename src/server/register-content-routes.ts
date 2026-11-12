@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { cleanArticle } from "./article-store";
 import { getCurrentUser } from "./auth";
 import {
 	extractArticleContent,
@@ -101,7 +102,9 @@ export function registerContentRoutes(app: Hono<AppBindings>) {
 								title: article.title,
 								byline: article.byline,
 								excerpt: article.excerpt,
-								content: article.content,
+								// Same cleanup as saved copies: sanitized, proxied
+								// images, and links that open outside the reader.
+								content: cleanArticle(article.content, finalUrl),
 							});
 						}
 						return c.json({
@@ -116,13 +119,11 @@ export function registerContentRoutes(app: Hono<AppBindings>) {
 			);
 			return result || c.json({ error: "URL is not allowed" }, 400);
 		} catch (error: unknown) {
+			const timedOut = error instanceof Error && error.name === "AbortError";
+			// The upstream site failed, not this server.
 			return c.json(
-				createArticleOpenError(
-					error instanceof Error && error.name === "AbortError"
-						? "timeout"
-						: "fetch_failed",
-				),
-				500,
+				createArticleOpenError(timedOut ? "timeout" : "fetch_failed"),
+				timedOut ? 504 : 502,
 			);
 		}
 	});
