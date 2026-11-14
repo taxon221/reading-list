@@ -9,8 +9,8 @@ import {
 } from "./shared.js";
 import { createEmptyState } from "./utils.js";
 
-export function initReaderHighlights(app, readerApi) {
-	const highlightUi = createReaderHighlightUi(readerApi);
+export function initReaderHighlights(app) {
+	const highlightUi = createReaderHighlightUi();
 
 	async function loadHighlights(itemId) {
 		const response = await fetch(`/api/items/${itemId}/highlights`).catch(

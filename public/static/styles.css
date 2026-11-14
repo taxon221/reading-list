@@ -562,7 +562,8 @@ body.modal-open {
     align-items: center;
     justify-content: center;
     padding: 1rem;
-    z-index: 1000;
+    /* Above the reader (2000) so Edit opened with "t" is visible. */
+    z-index: 2500;
 }
 
 .modal {

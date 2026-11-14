@@ -133,7 +133,7 @@ function createHighlightCard(highlight) {
     </div>`);
 }
 
-export function createReaderHighlightUi(readerApi) {
+export function createReaderHighlightUi() {
 	function renderSidebarHighlights() {
 		if (!dom.sidebarHighlights || !dom.highlightsCount) return;
 
@@ -435,24 +435,20 @@ export function createReaderHighlightUi(readerApi) {
 			if (element.closest("a") && (event.metaKey || event.ctrlKey)) return;
 
 			event.preventDefault();
-			openNoteModal(
-				highlight.selected_text,
-				highlight.note || "",
-				highlightId,
-			);
+			openNoteModal(highlight.selected_text, highlight.note || "", highlightId);
 		});
+		// Reader shortcuts listen on the main page; pass them up from the frame.
 		doc.addEventListener("keydown", (event) => {
-			if (shouldIgnoreKeyboardShortcut(event)) return;
-			const key = event.key.toLowerCase();
-			if (key === "o") {
-				event.preventDefault();
-				readerApi.openReaderOriginal?.();
+			const isEscape = event.key === "Escape";
+			if (isEscape ? event.defaultPrevented : shouldIgnoreKeyboardShortcut(event))
 				return;
-			}
-			if (key === "h") {
-				event.preventDefault();
-				readerApi.toggleReaderSidebar?.();
-			}
+			if (!isEscape && !["o", "h", "t"].includes(event.key.toLowerCase())) return;
+			const forwarded = new KeyboardEvent("keydown", {
+				key: event.key,
+				cancelable: true,
+			});
+			document.dispatchEvent(forwarded);
+			if (forwarded.defaultPrevented) event.preventDefault();
 		});
 		startMobileSelectionPoll();
 	}

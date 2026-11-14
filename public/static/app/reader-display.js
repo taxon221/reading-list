@@ -381,9 +381,17 @@ export function mountPdfReader(fileUrl, itemId, readerApi) {
 	state.readerIframe = iframe;
 
 	iframe.onload = () => {
+		focusReaderFrame(iframe);
 		readerApi.setupIframeSelectionListener?.();
 		readerApi.scheduleApplyHighlightsToDocument?.();
 	};
+}
+
+/** Lets arrow keys and Space scroll the document as soon as it loads. */
+export function focusReaderFrame(iframe) {
+	if (state.readerIframe !== iframe) return;
+	if (document.activeElement?.matches("input, textarea, select")) return;
+	iframe.contentWindow?.focus();
 }
 
 export async function fetchParsedArticle(articleUrl) {

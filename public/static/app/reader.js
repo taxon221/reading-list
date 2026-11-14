@@ -3,6 +3,7 @@ import {
 	createReaderLoadingState,
 	createVideoIframe,
 	fetchParsedArticle,
+	focusReaderFrame,
 	getReaderSourceUrl,
 	lockBackgroundScroll,
 	mountPdfReader,
@@ -37,7 +38,7 @@ export function initReader(app) {
 		toggleReaderSidebar,
 	};
 	Object.assign(readerApi, initReaderProgress());
-	Object.assign(readerApi, initReaderHighlights(app, readerApi));
+	Object.assign(readerApi, initReaderHighlights(app));
 
 	function getArticleErrorActions() {
 		return [{ label: "Open original", onClick: openReaderOriginal }];
@@ -167,6 +168,7 @@ export function initReader(app) {
 
 			iframe.onload = () => {
 				revokeReaderBlobUrl();
+				focusReaderFrame(iframe);
 				syncOpenArticleTheme();
 				readerApi.scheduleApplyHighlightsToDocument?.();
 				readerApi.setupIframeSelectionListener?.();
@@ -278,8 +280,9 @@ export function initReader(app) {
 	document.addEventListener("keydown", (event) => {
 		const readerOpen =
 			dom.readerModal && dom.readerModal.style.display !== "none";
+		const editOpen = dom.editModal && dom.editModal.style.display !== "none";
 
-		if (readerOpen && !shouldIgnoreKeyboardShortcut(event)) {
+		if (readerOpen && !editOpen && !shouldIgnoreKeyboardShortcut(event)) {
 			if (handleEpubPageKey(event)) {
 				event.preventDefault();
 				readerApi.hideSelectionPopup?.();
@@ -307,10 +310,10 @@ export function initReader(app) {
 
 		if (dom.noteModal && dom.noteModal.style.display !== "none") {
 			readerApi.closeNoteModal?.();
-		} else if (readerOpen) {
-			closeReader();
 		} else if (dom.editModal && dom.editModal.style.display !== "none") {
 			app.closeEditModal?.();
+		} else if (readerOpen) {
+			closeReader();
 		}
 
 		app.closeItemMenu?.();
