@@ -242,18 +242,28 @@ export async function openEpubReader(itemUrl, readerApi) {
 			setTimeout(attachSelectionToCurrentChapter, 30);
 		});
 
-		rendition.on("relocated", (location) => {
+		// Until the book-wide location index exists, epub.js only knows pages
+		// within the current chapter, which would overwrite saved progress.
+		let locationsReady = false;
+		const reportLocation = (location) => {
 			const progress = updateEpubLocation(location, book);
 			readerApi.setReaderProgress?.(true, progress.ratio, progress.label);
 			readerApi.queueReaderProgressSave?.(progress.payload);
+		};
+		// Meanwhile keep saving the exact position (the CFI) with the last known
+		// book-wide percentage, so closing early doesn't lose page turns.
+		let savedRatio = 0;
+		rendition.on("relocated", (location) => {
+			if (locationsReady) reportLocation(location);
+			else if (location?.start?.cfi)
+				readerApi.queueReaderProgressSave?.({
+					kind: "epub",
+					cfi: location.start.cfi,
+					percentage: savedRatio,
+				});
 		});
 
 		await withTimeout(book.ready, 12000, "EPUB parsing timed out.");
-		await withTimeout(
-			book.locations.generate(1000),
-			12000,
-			"EPUB progress indexing timed out.",
-		).catch(() => null);
 
 		const savedProgress = readerApi.getCurrentItemReadingProgress(
 			state.currentReaderId,
@@ -262,6 +272,14 @@ export async function openEpubReader(itemUrl, readerApi) {
 			savedProgress && savedProgress.kind === "epub" && savedProgress.cfi
 				? savedProgress.cfi
 				: undefined;
+		if (savedProgress?.kind === "epub")
+			savedRatio = clampProgressRatio(
+				typeof savedProgress.percentage === "number"
+					? savedProgress.percentage
+					: savedProgress.total > 0
+						? savedProgress.page / savedProgress.total
+						: 0,
+			);
 
 		if (savedCfi) {
 			await withTimeout(
@@ -276,16 +294,19 @@ export async function openEpubReader(itemUrl, readerApi) {
 		}
 
 		attachSelectionToCurrentChapter();
-		const initialProgress = updateEpubLocation(
-			rendition.currentLocation(),
-			book,
-		);
-		readerApi.setReaderProgress?.(
-			true,
-			initialProgress.ratio,
-			initialProgress.label,
-		);
-		readerApi.queueReaderProgressSave?.(initialProgress.payload);
+		// Index locations after the book is visible instead of before; large
+		// books took seconds of spinner. The saved progress shows meanwhile.
+		void withTimeout(
+			book.locations.generate(1000),
+			30000,
+			"EPUB progress indexing timed out.",
+		)
+			.catch(() => null)
+			.then(() => {
+				if (state.currentEpubBook !== book) return;
+				locationsReady = true;
+				reportLocation(rendition.currentLocation());
+			});
 
 		setTimeout(() => {
 			if (!stage.querySelector("iframe")) {

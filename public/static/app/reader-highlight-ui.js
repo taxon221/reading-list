@@ -208,30 +208,55 @@ export function createReaderHighlightUi() {
 		const doc = getIframeDocument(state.readerIframe);
 		if (!doc?.querySelector(`[data-highlight-id="${highlightId}"]`)) return;
 		scrollToHighlight(highlightId);
+		// Keep re-centering briefly so the saved-position restore can't win,
+		// then stop so later page renders don't pull the reader back.
+		if (foundScrollHighlightId !== highlightId) {
+			foundScrollHighlightId = highlightId;
+			expirePendingScroll(highlightId, 2000);
+		}
 	}
+
+	function expirePendingScroll(highlightId, ms) {
+		clearTimeout(pendingScrollExpiry);
+		pendingScrollExpiry = setTimeout(() => {
+			if (state.pendingScrollHighlightId === highlightId)
+				state.pendingScrollHighlightId = null;
+			foundScrollHighlightId = null;
+		}, ms);
+	}
+
+	// Content keeps settling after load (fonts, images, PDF pages), so a few
+	// follow-up passes run. Each new request replaces the previous follow-ups,
+	// so a burst of page renders costs one set instead of one per page.
+	let followUpTimers = [];
+	let pendingScrollExpiry = null;
+	let foundScrollHighlightId = null;
+	const fontHookedDocuments = new WeakSet();
 
 	function scheduleApplyHighlightsToDocument() {
 		applyAndMaybeScroll();
+		for (const timer of followUpTimers) clearTimeout(timer);
+		followUpTimers = [];
 		if (state.currentHighlights.length === 0) return;
 
-		for (const ms of [80, 200, 450, 900, 1600]) {
-			setTimeout(applyAndMaybeScroll, ms);
-		}
+		followUpTimers = [80, 200, 450, 900, 1600].map((ms) =>
+			setTimeout(applyAndMaybeScroll, ms),
+		);
 
-		if (state.pendingScrollHighlightId) {
-			setTimeout(() => {
-				state.pendingScrollHighlightId = null;
-			}, 500);
-		}
+		// Give a jump-to-highlight time to find pages that render late.
+		const pendingId = state.pendingScrollHighlightId;
+		if (pendingId && foundScrollHighlightId !== pendingId)
+			expirePendingScroll(pendingId, 5000);
 
 		const hookFonts = () => {
 			const iframeDoc = getIframeDocument(state.readerIframe);
-			if (iframeDoc?.fonts?.ready) {
-				void iframeDoc.fonts.ready.then(applyAndMaybeScroll);
-			}
+			if (!iframeDoc?.fonts?.ready || fontHookedDocuments.has(iframeDoc))
+				return;
+			fontHookedDocuments.add(iframeDoc);
+			void iframeDoc.fonts.ready.then(applyAndMaybeScroll);
 		};
 		hookFonts();
-		setTimeout(hookFonts, 120);
+		followUpTimers.push(setTimeout(hookFonts, 120));
 	}
 
 	function scrollToHighlight(highlightId) {

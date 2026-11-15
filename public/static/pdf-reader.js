@@ -13,6 +13,7 @@ const initialProgress =
 const pages = new Map();
 let pdf,
 	observer,
+	releaseObserver,
 	progressTicking = false;
 let renderQueue = Promise.resolve();
 GlobalWorkerOptions.workerSrc = "/static/vendor/pdf.worker.mjs";
@@ -43,7 +44,8 @@ function safeFileUrl(value) {
 }
 async function renderPage(number) {
 	const entry = pages.get(number);
-	if (!entry || entry.rendered) return;
+	// Skip pages scrolled past while queued, so the visible page renders next.
+	if (!entry || entry.rendered || !entry.near) return;
 	entry.rendered = true;
 	try {
 		const page = await pdf.getPage(number);
@@ -144,7 +146,7 @@ async function start() {
 			element.setAttribute("aria-label", `Page ${number}`);
 			element.style.width = `${size.width * scale}px`;
 			element.style.height = `${size.height * scale}px`;
-			pages.set(number, { element, scale, rendered: false });
+			pages.set(number, { element, scale, rendered: false, near: false });
 			containerEl.append(element);
 		}
 		const root = document.scrollingElement || document.documentElement;
@@ -153,19 +155,39 @@ async function start() {
 			(entries) => {
 				for (const entry of entries) {
 					const number = Number(entry.target.dataset.page);
+					pages.get(number).near = entry.isIntersecting;
 					if (entry.isIntersecting)
 						renderQueue = renderQueue.then(() => renderPage(number));
 				}
 			},
 			{ rootMargin: "1000px 0px" },
 		);
-		for (const entry of pages.values()) observer.observe(entry.element);
+		// Canvases take several MB each; free pages far from view. The placeholder
+		// keeps its size, and highlights are reapplied when the page renders again.
+		releaseObserver = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					const page = pages.get(Number(entry.target.dataset.page));
+					if (entry.isIntersecting || !page.rendered) continue;
+					page.rendered = false;
+					for (const canvas of page.element.querySelectorAll("canvas"))
+						canvas.width = canvas.height = 0;
+					page.element.replaceChildren();
+				}
+			},
+			{ rootMargin: "4000px 0px" },
+		);
+		for (const entry of pages.values()) {
+			observer.observe(entry.element);
+			releaseObserver.observe(entry.element);
+		}
 		showCurrentPage();
 		window.addEventListener("scroll", postProgress, { passive: true });
 		window.addEventListener(
 			"pagehide",
 			() => {
 				observer.disconnect();
+				releaseObserver.disconnect();
 				pdf.destroy();
 			},
 			{ once: true },

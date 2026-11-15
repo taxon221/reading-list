@@ -22,7 +22,10 @@ export function initReaderHighlights(app) {
 			return;
 		}
 
-		state.currentHighlights = response?.ok ? await response.json() : [];
+		const highlights = response?.ok ? await response.json() : [];
+		// Ignore a slow response for an item that is no longer open.
+		if (String(state.currentReaderId) !== String(itemId)) return;
+		state.currentHighlights = highlights;
 		highlightUi.renderSidebarHighlights();
 	}
 

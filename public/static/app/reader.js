@@ -100,11 +100,13 @@ export function initReader(app) {
 			readerApi.setReaderProgress?.(false);
 		}
 
-		await readerApi.loadHighlights?.(id);
-
 		if (dom.readerContent) {
 			dom.readerContent.replaceChildren(createReaderLoadingState());
 		}
+
+		await readerApi.loadHighlights?.(id);
+		// Another item may have been opened while highlights loaded.
+		if (state.currentReaderId !== id) return;
 
 		if (type === "video") {
 			const youtubeMatch = itemUrl.match(

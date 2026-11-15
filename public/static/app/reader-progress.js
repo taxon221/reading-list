@@ -515,17 +515,20 @@ export function initReaderProgress() {
 		win.addEventListener("scroll", onScroll, { passive: true });
 		restoreProgress(true);
 
+		// Scroll events do the real-time work; this backstop catches layouts that
+		// scroll without firing them. Rescanning every element is costly, so it is rare.
 		let tick = 0;
 		state.articleProgressPoll = setInterval(() => {
 			if (!state.currentReaderId || !state.readerIframe) {
 				stopArticleProgressPoll();
 				return;
 			}
+			if (document.hidden) return;
 
 			tick += 1;
 			if (tick % 10 === 0) refreshScrollContainers();
 			persistRatio();
-		}, 200);
+		}, 1000);
 
 		setTimeout(refreshScrollContainers, 350);
 		setTimeout(() => restoreProgress(false), 320);
