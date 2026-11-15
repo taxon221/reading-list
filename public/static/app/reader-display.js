@@ -214,7 +214,7 @@ export function buildParsedArticleDocument(data) {
     <title>${title || "Article"}</title>
     <style>
       :root{color-scheme:${isDark ? "dark" : "light"};--rl-reader-bg:${background};--rl-reader-text:${text};--rl-reader-muted:${muted};--rl-reader-accent:${accent};--rl-reader-rule:${rule};--rl-reader-quote:${quote};--rl-reader-highlight:${highlight};--rl-reader-font-size:${fontSize}px}
-      html{scroll-behavior:smooth;background:var(--rl-reader-bg)}
+      html{background:var(--rl-reader-bg)}
       body{margin:0 auto;padding:max(96px, calc(64px + env(safe-area-inset-top))) max(20px, env(safe-area-inset-right)) max(120px, calc(80px + env(safe-area-inset-bottom))) max(20px, env(safe-area-inset-left));max-width:44rem;background:var(--rl-reader-bg);color:var(--rl-reader-text);font-family:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;font-size:var(--rl-reader-font-size,20px);line-height:1.78;letter-spacing:.01em;-webkit-text-size-adjust:100%;text-size-adjust:100%}
       .rl-reader-header{margin:0 0 2.6rem;padding-bottom:1.4rem;border-bottom:1px solid var(--rl-reader-rule)}
       .rl-reader-header h1{margin:0 0 .7rem;font-size:clamp(2rem,4vw,3.2rem);line-height:1.03;letter-spacing:-.02em}

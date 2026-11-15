@@ -1287,6 +1287,7 @@ body.modal-open {
 
 .reader-progress-label {
     min-width: 2.75rem;
+    white-space: nowrap;
     text-align: right;
     font-size: 0.75rem;
     color: var(--text-light);
@@ -1309,6 +1310,10 @@ body.modal-open {
     align-items: center;
     gap: 0.5rem;
     flex-shrink: 0;
+}
+
+.reader-font-controls[hidden] {
+    display: none;
 }
 
 .reader-font-controls {

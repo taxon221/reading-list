@@ -44,6 +44,11 @@ export function initReader(app) {
 		return [{ label: "Open original", onClick: openReaderOriginal }];
 	}
 
+	function setFontControlsVisible(visible) {
+		const controls = document.querySelector(".reader-font-controls");
+		if (controls) controls.hidden = !visible;
+	}
+
 	async function openReader(
 		id,
 		itemUrl,
@@ -66,10 +71,20 @@ export function initReader(app) {
 		lockBackgroundScroll();
 		if (dom.readerModal) dom.readerModal.style.display = "flex";
 		if (dom.readerTitle) dom.readerTitle.textContent = title;
+		// Name the tab and history entry after what is being read.
+		document.title = title ? `${title} · Reading List` : "Reading List";
 		if (dom.readerOpenOriginal) {
 			dom.readerOpenOriginal.href = getAuthorizedItemUrl(itemUrl);
 		}
 		setReaderSidebarOpen(false);
+
+		// Text size only applies to articles and EPUBs.
+		setFontControlsVisible(
+			type !== "pdf" &&
+				type !== "video" &&
+				type !== "podcast" &&
+				!itemUrl.toLowerCase().endsWith(".pdf"),
+		);
 
 		const currentItem = state.itemsById.get(Number(id));
 		const itemProgress = getItemProgressInfo(currentItem);
@@ -148,6 +163,7 @@ export function initReader(app) {
 		}
 
 		if (data.type === "html") {
+			setFontControlsVisible(true);
 			const iframe = document.createElement("iframe");
 			iframe.sandbox = "allow-same-origin allow-popups";
 			if (!dom.readerContent) return;
@@ -185,6 +201,7 @@ export function initReader(app) {
 		}
 
 		if (data.type === "pdf") {
+			setFontControlsVisible(false);
 			const fileUrl = getReaderSourceUrl(data.url, "pdf");
 			if (!fileUrl) {
 				showReaderError(itemUrl, "This PDF URL is not supported.");
@@ -209,6 +226,7 @@ export function initReader(app) {
 			history.replaceState({}, "", location.pathname + location.search);
 		}
 		const closedItemId = state.currentReaderId;
+		document.title = "Reading List";
 		resetEpubReader();
 		revokeReaderBlobUrl();
 		readerApi.stopArticleProgressPoll?.();

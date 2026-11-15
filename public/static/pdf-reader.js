@@ -98,11 +98,19 @@ function progressRatio() {
 	const max = root.scrollHeight - root.clientHeight;
 	return max > 0 ? Math.max(0, Math.min(1, root.scrollTop / max)) : 0;
 }
+function showCurrentPage() {
+	const page = document
+		.elementFromPoint(innerWidth / 2, innerHeight / 2)
+		?.closest(".pdf-page");
+	if (page)
+		statusEl.textContent = `Page ${page.dataset.page} of ${pdf.numPages}`;
+}
 function postProgress() {
 	if (progressTicking) return;
 	progressTicking = true;
 	requestAnimationFrame(() => {
 		progressTicking = false;
+		showCurrentPage();
 		parent.postMessage(
 			{ type: "reading-progress", kind: "pdf", ratio: progressRatio() },
 			location.origin,
@@ -152,6 +160,7 @@ async function start() {
 			{ rootMargin: "1000px 0px" },
 		);
 		for (const entry of pages.values()) observer.observe(entry.element);
+		showCurrentPage();
 		window.addEventListener("scroll", postProgress, { passive: true });
 		window.addEventListener(
 			"pagehide",

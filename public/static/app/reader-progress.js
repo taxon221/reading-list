@@ -22,8 +22,18 @@ function setReaderProgress(visible, ratio = 0, label = "0%") {
 	const clampedRatio = clampProgressRatio(ratio);
 	dom.readerProgress.style.display = "flex";
 	dom.readerProgressFill.style.width = `${Math.round(clampedRatio * 100)}%`;
-	dom.readerProgressLabel.textContent =
-		label || `${Math.round(clampedRatio * 100)}%`;
+	const minutesLeft = getMinutesLeft(clampedRatio);
+	dom.readerProgressLabel.textContent = `${label || `${Math.round(clampedRatio * 100)}%`}${minutesLeft ? ` · ${minutesLeft} min left` : ""}`;
+}
+
+/** Estimates the reading time left in the open article from its saved estimate. */
+function getMinutesLeft(ratio) {
+	const item = state.itemsById.get(Number(state.currentReaderId));
+	const minutes = item?.reading_time_minutes;
+	if (item?.type !== "article" || !Number.isInteger(minutes) || minutes <= 0)
+		return 0;
+	if (ratio >= 0.99) return 0;
+	return Math.max(1, Math.ceil(minutes * (1 - ratio)));
 }
 
 function stopArticleProgressPoll() {
