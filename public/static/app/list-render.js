@@ -160,6 +160,9 @@ function buildThumbContent(type, url, previewImage) {
 }
 
 export function createListRenderer({ onToggleInclude, onToggleExclude }) {
+	// Checked once per render rather than once per item.
+	let useNewLayout = true;
+
 	function createItemElement(item) {
 		const article = document.createElement("article");
 		article.className = item.is_read ? "item read" : "item";
@@ -182,7 +185,6 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 		left.append(type, date);
 
 		const progress = renderItemProgressMeta(item);
-		const useNewLayout = !isMobilePwa();
 		if (!useNewLayout && progress) left.appendChild(progress);
 
 		const right = document.createElement("div");
@@ -375,6 +377,7 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 			return;
 		}
 
+		useNewLayout = !isMobilePwa();
 		dom.itemsList.replaceChildren(...items.map(createItemElement));
 	}
 
@@ -382,7 +385,16 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 		const existing = dom.itemsList?.querySelector(
 			`.item[data-id="${Number(item.id)}"]`,
 		);
-		if (existing) existing.replaceWith(createItemElement(item));
+		if (!existing) return;
+		useNewLayout = !isMobilePwa();
+		const focusedAction = existing.contains(document.activeElement)
+			? document.activeElement.dataset?.action
+			: null;
+		const next = createItemElement(item);
+		existing.replaceWith(next);
+		// Keep keyboard focus on the same control after the row is rebuilt.
+		if (focusedAction)
+			next.querySelector(`[data-action="${focusedAction}"]`)?.focus();
 	}
 
 	function renderTagOptions(

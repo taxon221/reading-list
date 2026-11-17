@@ -231,6 +231,9 @@ body.modal-open {
     transition:
         box-shadow 0.2s,
         opacity 0.2s;
+    /* Skip layout and paint for rows far off screen in large libraries. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 84px;
 }
 
 .item:hover {

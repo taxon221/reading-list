@@ -504,7 +504,7 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 		toggleSavedViewId(viewId);
 		closeAllDropdowns();
 		closeSaveViewModal();
-		refreshList({ reloadServer: true });
+		refreshList();
 	}
 
 	async function saveCurrentView() {

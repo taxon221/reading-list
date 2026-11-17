@@ -127,17 +127,16 @@ export function initList(app) {
 		savedViews.syncActiveSavedView();
 	}
 
-	function refreshList({ reloadServer = false } = {}) {
+	// Filters apply to the loaded library, so changing them never refetches it.
+	function refreshList() {
 		syncFilterUi();
-		if (reloadServer) {
-			loadItems();
-			return;
-		}
 		renderCurrentItems();
 	}
 
+	let loadSequence = 0;
 	async function loadItems() {
 		if (state.isUnauthorized) return;
+		const sequence = ++loadSequence;
 
 		const url = "/api/items";
 		const progressSnapshot = captureProgressSnapshot();
@@ -166,7 +165,9 @@ export function initList(app) {
 			status.textContent = "Couldn't load your library. Please try again.";
 			return;
 		}
+		// A newer load started meanwhile; its response is fresher than this one.
 		if (
+			sequence !== loadSequence ||
 			progressSnapshot.account !== (state.authUi.currentUser?.email || "guest")
 		)
 			return;
@@ -209,7 +210,7 @@ export function initList(app) {
 				);
 				if (nextState === "include") state.selectedTags.push(tagName);
 				if (nextState === "exclude") state.excludedTags.push(tagName);
-				refreshList({ reloadServer: true });
+				refreshList();
 			},
 		});
 		filters.updateTagFilterDisplay();

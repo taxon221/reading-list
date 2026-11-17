@@ -67,7 +67,11 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 			return;
 		}
 
-		loadItems();
+		// Update the row in place so the list keeps its scroll and focus.
+		const item = state.itemsById.get(Number(id));
+		if (!item) return loadItems();
+		item.is_read = currentStatus ? 0 : 1;
+		app.refreshReaderItem?.(id);
 	}
 
 	async function deleteItem(id) {
@@ -79,13 +83,14 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 		}).catch(() => null);
 		if (response && handleAuthFailure(response)) return;
 		if (!response?.ok) {
-			showToast("Couldn't update this item. Please try again.", {
+			showToast("Couldn't delete this item. Please try again.", {
 				type: "error",
 			});
 			return;
 		}
 
-		loadItems();
+		state.itemsById.delete(Number(id));
+		app.refreshList?.();
 		loadTags();
 	}
 

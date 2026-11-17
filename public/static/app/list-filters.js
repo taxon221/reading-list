@@ -2,8 +2,6 @@ import { getCurrentFilters } from "./list-saved-views.js";
 import { dom, state } from "./shared.js";
 import { applySearch, getDomain, parseReadingProgress } from "./utils.js";
 
-const CLIENT_ONLY_FILTER_TYPES = new Set(["domain", "author"]);
-
 function isMobilePwa() {
 	const standalone =
 		window.matchMedia?.("(display-mode: standalone)")?.matches ||
@@ -27,10 +25,6 @@ function getFilterStateKeys(type) {
 		selected: `selected${suffix}`,
 		excluded: `excluded${suffix}`,
 	};
-}
-
-function shouldReloadServer(type) {
-	return !CLIENT_ONLY_FILTER_TYPES.has(type);
 }
 
 export function createListFilters({ refreshList }) {
@@ -176,7 +170,7 @@ export function createListFilters({ refreshList }) {
 			state[excluded] = state[excluded].filter((entry) => entry !== value);
 		}
 
-		refreshList({ reloadServer: shouldReloadServer(type) });
+		refreshList();
 	}
 
 	function toggleExclude(type, value) {
@@ -188,14 +182,14 @@ export function createListFilters({ refreshList }) {
 			state[selected] = state[selected].filter((entry) => entry !== value);
 		}
 
-		refreshList({ reloadServer: shouldReloadServer(type) });
+		refreshList();
 	}
 
 	function filterByTag(tag) {
 		if (state.selectedTags.includes(tag)) return;
 		state.selectedTags = [...state.selectedTags, tag];
 		state.excludedTags = state.excludedTags.filter((entry) => entry !== tag);
-		refreshList({ reloadServer: true });
+		refreshList();
 	}
 
 	function createFilterChip(text, onRemove, isExclude) {
@@ -230,7 +224,7 @@ export function createListFilters({ refreshList }) {
 						state.selectedTags = state.selectedTags.filter(
 							(entry) => entry !== tag,
 						);
-						refreshList({ reloadServer: true });
+						refreshList();
 					},
 					false,
 				),
@@ -245,7 +239,7 @@ export function createListFilters({ refreshList }) {
 						state.excludedTags = state.excludedTags.filter(
 							(entry) => entry !== tag,
 						);
-						refreshList({ reloadServer: true });
+						refreshList();
 					},
 					true,
 				),
@@ -322,7 +316,7 @@ export function createListFilters({ refreshList }) {
 			.forEach((checkbox) => {
 				checkbox.addEventListener("change", () => {
 					updateSelectedTypes();
-					refreshList({ reloadServer: true });
+					refreshList();
 				});
 			});
 
@@ -387,13 +381,13 @@ export function createListFilters({ refreshList }) {
 					checkbox.checked = false;
 				});
 			state.selectedTypes = [];
-			refreshList({ reloadServer: true });
+			refreshList();
 		});
 
 		dom.tagClear?.addEventListener("click", () => {
 			state.selectedTags = [];
 			state.excludedTags = [];
-			refreshList({ reloadServer: true });
+			refreshList();
 		});
 	}
 
