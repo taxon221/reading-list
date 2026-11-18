@@ -30,9 +30,16 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 		state.currentDropdownItemUrl = url;
 
 		const rect = button.getBoundingClientRect();
-		dom.itemDropdownMenu.style.top = `${rect.bottom + 4}px`;
-		dom.itemDropdownMenu.style.left = `${rect.right - 160}px`;
+		dom.itemDropdownMenu.style.left = `${Math.max(8, rect.right - 160)}px`;
 		dom.itemDropdownMenu.style.display = "block";
+		// Open upwards when the row sits near the bottom of the screen.
+		const menuHeight = dom.itemDropdownMenu.offsetHeight;
+		const below = rect.bottom + 4;
+		dom.itemDropdownMenu.style.top = `${
+			below + menuHeight > window.innerHeight && rect.top - menuHeight - 4 > 0
+				? rect.top - menuHeight - 4
+				: below
+		}px`;
 
 		document.querySelectorAll(".btn-more").forEach((node) => {
 			node.classList.remove("active");
@@ -159,6 +166,14 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 				closeItemMenu();
 			}
 		});
+		// The menu is fixed-position, so it would drift away from its row.
+		window.addEventListener(
+			"scroll",
+			() => {
+				if (state.currentDropdownItemId) closeItemMenu();
+			},
+			{ passive: true },
+		);
 	}
 
 	function initItemsList() {
