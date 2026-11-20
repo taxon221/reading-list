@@ -326,6 +326,12 @@ export function initAppAuth(app) {
 						label: `Remove ${title}`,
 						disabled: data.passkeys.length === 1,
 						onClick: async () => {
+							if (
+								!confirm(
+									`Remove ${title}? You won't be able to sign in with it again.`,
+								)
+							)
+								return;
 							await postConfirmed("manage/remove-passkey", { id: key.id });
 							await loadDevices();
 						},
@@ -366,6 +372,12 @@ export function initAppAuth(app) {
 	});
 	byId("add-passkey").onclick = () => show("register");
 	byId("replace-recovery").onclick = async () => {
+		if (
+			!confirm(
+				"Replace your recovery codes? Your current codes will stop working immediately.",
+			)
+		)
+			return;
 		try {
 			showRecoveryCodes(
 				(await postConfirmed("manage/recovery")).recoveryCodes,

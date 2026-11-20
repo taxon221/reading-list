@@ -1,6 +1,38 @@
+import { showToast } from "./toast.js";
 import { dom, handleAuthFailure, state } from "./shared.js";
 
 const deleteFacetsData = { tags: [], authors: [], domains: [] };
+
+/** Mirrors the server's delete-by matching so the confirmation can show a count. */
+function countMatchingItems(by, values) {
+	const needles = values.map((value) =>
+		value
+			.trim()
+			.toLowerCase()
+			.replace(/^www\./, ""),
+	);
+	let count = 0;
+	for (const item of state.itemsById.values()) {
+		let matches = false;
+		if (by === "tag")
+			matches = (item.tags || []).some((tag) =>
+				needles.includes(tag.toLowerCase()),
+			);
+		else if (by === "author")
+			matches = needles.includes((item.author || "").trim().toLowerCase());
+		else if (by === "type") matches = values.includes(item.type);
+		else if (by === "domain" && URL.canParse(item.url)) {
+			const host = new URL(item.url).hostname
+				.toLowerCase()
+				.replace(/^www\./, "");
+			matches = needles.some(
+				(needle) => host === needle || host.endsWith(`.${needle}`),
+			);
+		}
+		if (matches) count++;
+	}
+	return count;
+}
 
 let hasLoadedDeleteFacets = false;
 let deleteBy = "tag";
@@ -151,7 +183,7 @@ async function confirmDeleteItems() {
 	const by = deleteBy;
 	const values = getDeleteFormValue();
 	if (!by || values.length === 0) {
-		alert("Choose at least one value.");
+		showToast("Choose at least one value.");
 		return;
 	}
 
@@ -159,9 +191,14 @@ async function confirmDeleteItems() {
 		values.length === 1
 			? `"${formatDeleteChoice(values[0])}"`
 			: `${values.length} selected values`;
+	const count = countMatchingItems(by, values);
+	if (count === 0) {
+		showToast("No matching items.");
+		return;
+	}
 	if (
 		!confirm(
-			`Delete all items where ${by} matches ${preview}? This cannot be undone.`,
+			`Delete ${count} item${count === 1 ? "" : "s"} where ${by} matches ${preview}? This cannot be undone.`,
 		)
 	)
 		return;
@@ -172,7 +209,7 @@ async function confirmDeleteItems() {
 		body: JSON.stringify({ by, values }),
 	}).catch(() => null);
 	if (!response) {
-		alert("Delete failed.");
+		showToast("Delete failed. Please try again.", { type: "error" });
 		return;
 	}
 	if (handleAuthFailure(response)) return;
@@ -184,14 +221,14 @@ async function confirmDeleteItems() {
 		data = {};
 	}
 	if (!response.ok) {
-		alert(data.error || "Delete failed.");
+		showToast(data.error || "Delete failed.", { type: "error" });
 		return;
 	}
 
 	hasLoadedDeleteFacets = false;
 	clearDeleteForm();
 	closeDropdowns();
-	alert(
+	showToast(
 		data.deleted ? `Deleted ${data.deleted} item(s).` : "No matching items.",
 	);
 	refreshItems();

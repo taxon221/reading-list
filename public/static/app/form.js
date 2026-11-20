@@ -120,12 +120,12 @@ function openAddModal(mode) {
 function stageSelectedFiles(fileList) {
 	const files = getSupportedUploadFiles(fileList);
 	if (files.length === 0) {
-		alert("Please choose a PDF or EPUB file.");
+		showToast("Please choose a PDF or EPUB file.", { type: "error" });
 		return;
 	}
 
 	if (files.length > 1) {
-		alert("Please choose one file at a time.");
+		showToast("Please choose one file at a time.");
 	}
 
 	const file = files[0];
@@ -174,7 +174,7 @@ async function addPendingUploadFile(app) {
 			body: formData,
 		}).catch(() => null);
 		if (!response) {
-			alert("File upload failed. Please try again.");
+			showToast("File upload failed. Please try again.", { type: "error" });
 			return;
 		}
 
@@ -194,7 +194,7 @@ async function addPendingUploadFile(app) {
 			]
 				.filter(Boolean)
 				.join("\n");
-			alert(message);
+			showToast(message, { type: "error", duration: 10000 });
 			return;
 		}
 
@@ -209,7 +209,10 @@ async function addPendingUploadFile(app) {
 			]
 				.filter(Boolean)
 				.join("\n");
-			alert(message);
+			showToast(message, {
+				type: data.failed_files?.length ? "error" : "info",
+				duration: 10000,
+			});
 		}
 
 		resetAddForm(app);
@@ -340,7 +343,9 @@ function initImport(app) {
 			const allRows = parseCsvRows(text);
 
 			if (allRows.length < 2) {
-				alert("CSV appears to be empty or has no data rows.");
+				showToast("CSV appears to be empty or has no data rows.", {
+					type: "error",
+				});
 				return;
 			}
 
@@ -381,8 +386,9 @@ function initImport(app) {
 						totalImported > 0
 							? `\n\n${totalImported} items were imported before the failure. Re-running the full import is safe — already-imported items will be skipped as duplicates.`
 							: "";
-					alert(
+					showToast(
 						`Batch ${i + 1}/${chunks.length} failed: ${lastErr?.message || "Unknown error."}${partial}`,
+						{ type: "error", duration: 10000 },
 					);
 					if (totalImported > 0) {
 						app.loadItems?.();
@@ -397,13 +403,16 @@ function initImport(app) {
 				totalErrors += result.errors ?? 0;
 			}
 
-			alert(
+			showToast(
 				`Imported ${totalImported} items. Duplicates: ${totalDuplicate}. Skipped: ${totalSkipped}. Errors: ${totalErrors}.`,
+				{ duration: 8000 },
 			);
 			app.loadItems?.();
 			app.loadTags?.();
 		} catch (err) {
-			alert(err?.message || "Import failed. Please try again.");
+			showToast(err?.message || "Import failed. Please try again.", {
+				type: "error",
+			});
 		} finally {
 			dom.importBtn.disabled = false;
 			dom.importBtn.textContent = originalText || "Import CSV";
@@ -445,7 +454,10 @@ function initMetadataLookup() {
 		const initialType = dom.typeSelect?.value || "article";
 		state.fetchTimeout = setTimeout(async () => {
 			state.isFetching = true;
-			if (dom.submitBtn) dom.submitBtn.textContent = "...";
+			if (dom.submitBtn) {
+				dom.submitBtn.textContent = "Fetching details…";
+				dom.submitBtn.setAttribute("aria-busy", "true");
+			}
 			const meta = await fetchMetadata(url);
 			if (meta && dom.urlInput?.value.trim() === url) {
 				state.fetchedMeta = meta;
@@ -460,7 +472,10 @@ function initMetadataLookup() {
 				}
 			}
 			state.isFetching = false;
-			if (dom.submitBtn) dom.submitBtn.textContent = "Add";
+			if (dom.submitBtn) {
+				dom.submitBtn.textContent = "Add";
+				dom.submitBtn.removeAttribute("aria-busy");
+			}
 		}, 300);
 	});
 }
@@ -556,7 +571,8 @@ async function submitItemForm(app, event) {
 		);
 	} finally {
 		dom.submitBtn.disabled = false;
-		dom.submitBtn.textContent = "Add";
+		dom.submitBtn.textContent =
+			state.addMode === "rss" ? "Add RSS feed" : "Add";
 	}
 }
 
@@ -701,18 +717,20 @@ async function importRssFeedUrl(app, feedUrl) {
 		body: JSON.stringify({ feed_url: feedUrl }),
 	}).catch(() => null);
 	if (!response) {
-		alert("RSS import failed: no response from server.");
+		showToast("Couldn't reach the server to add this feed.", { type: "error" });
 		return false;
 	}
 	if (handleAuthFailure(response)) return true;
 
 	const data = await response.json().catch(() => ({}));
 	if (!response.ok) {
-		alert(data.error || "RSS import failed.");
+		showToast(data.error || "This feed couldn't be added.", { type: "error" });
 		return false;
 	}
 
-	alert(`Following RSS feed. ${data.seen || 0} existing post(s) ignored.`);
+	showToast(
+		`Following feed. New posts will appear here; ${data.seen || 0} existing post(s) skipped.`,
+	);
 	await loadRssSubscriptions();
 	resetAddForm(app);
 	return true;
@@ -775,11 +793,19 @@ function initRssActions(app) {
 		const id = action.dataset.rssId;
 		if (!id) return;
 		if (action.dataset.rssAction === "delete") {
+			const name = action.dataset.rssName || "this feed";
+			if (!confirm(`Stop following ${name}? Saved posts stay in your library.`))
+				return;
 			const response = await fetch(`/api/rss-subscriptions/${id}`, {
 				method: "DELETE",
 			}).catch(() => null);
-			if (!response) return;
-			if (handleAuthFailure(response)) return;
+			if (response && handleAuthFailure(response)) return;
+			if (!response?.ok) {
+				showToast("Couldn't remove this feed. Please try again.", {
+					type: "error",
+				});
+				return;
+			}
 			await loadRssSubscriptions();
 		}
 	});
@@ -843,6 +869,8 @@ function renderRssSubscriptions(subscriptions) {
 		remove.dataset.rssAction = "delete";
 		remove.dataset.rssId = String(subscription.id);
 		remove.textContent = "Remove";
+		remove.dataset.rssName = title.textContent;
+		remove.setAttribute("aria-label", `Remove ${title.textContent}`);
 		row.append(main, remove);
 		dom.rssSubscriptionsList.appendChild(row);
 	}

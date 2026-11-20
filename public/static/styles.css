@@ -1827,6 +1827,7 @@ body.modal-open {
     box-shadow: var(--shadow-lg);
     font-size: 0.875rem;
     line-height: 1.45;
+    white-space: pre-line;
     opacity: 0;
     transform: translateY(0.5rem);
     transition:

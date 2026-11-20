@@ -3,6 +3,7 @@ import {
 	LEGACY_SAVED_VIEWS_STORAGE_KEY,
 } from "./list-constants.js";
 import { dom, handleAuthFailure, state } from "./shared.js";
+import { showToast } from "./toast.js";
 
 const BUILT_IN_VIEWS = Object.freeze([
 	{
@@ -323,12 +324,16 @@ export function createSavedViews({ closeAllDropdowns, refreshList }) {
 		}).catch(() => null);
 
 		if (!response) {
-			alert("Saved views could not be synced right now.");
+			showToast("Saved views could not be synced right now.", {
+				type: "error",
+			});
 			return false;
 		}
 		if (handleAuthFailure(response)) return false;
 		if (!response.ok) {
-			alert("Saved views could not be synced right now.");
+			showToast("Saved views could not be synced right now.", {
+				type: "error",
+			});
 			return false;
 		}
 
