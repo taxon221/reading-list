@@ -838,6 +838,11 @@ function initAddMenu() {
 		if (dom.addEntry?.contains(event.target)) return;
 		closeAddMenu();
 	});
+	document.addEventListener("keydown", (event) => {
+		if (event.key !== "Escape" || dom.addMenu?.hidden !== false) return;
+		closeAddMenu();
+		dom.addMenuButton?.focus();
+	});
 }
 
 function renderRssSubscriptions(subscriptions) {

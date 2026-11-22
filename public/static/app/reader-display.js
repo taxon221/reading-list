@@ -125,6 +125,7 @@ export function setReaderSidebarOpen(isOpen) {
 
 	dom.readerSidebar.classList.toggle("hidden", !isOpen);
 	dom.readerToggleNotes.classList.toggle("active", isOpen);
+	dom.readerToggleNotes.setAttribute("aria-expanded", String(Boolean(isOpen)));
 }
 
 export function openReaderOriginal() {

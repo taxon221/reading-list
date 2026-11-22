@@ -326,13 +326,17 @@ export function initReader(app) {
 			}
 		}
 
-		if (event.key !== "Escape") return;
+		// Something inside (like tag suggestions) already used this Escape.
+		if (event.key !== "Escape" || event.defaultPrevented) return;
 
 		if (dom.noteModal && dom.noteModal.style.display !== "none") {
+			event.preventDefault();
 			readerApi.closeNoteModal?.();
 		} else if (dom.editModal && dom.editModal.style.display !== "none") {
+			event.preventDefault();
 			app.closeEditModal?.();
 		} else if (readerOpen) {
+			event.preventDefault();
 			closeReader();
 		}
 

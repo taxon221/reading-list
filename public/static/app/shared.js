@@ -598,6 +598,7 @@ export function initAuthUi() {
 			dom.accountModalOverlay &&
 			!dom.accountModalOverlay.hidden
 		) {
+			event.preventDefault();
 			closeAccountModal();
 		}
 	});

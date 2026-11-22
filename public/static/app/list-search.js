@@ -203,6 +203,7 @@ function createSearchTokenChip(token, index) {
 	button.className = "search-token-chip-remove";
 	button.textContent = "×";
 	button.title = "Remove filter";
+	button.setAttribute("aria-label", `Remove ${label.textContent}`);
 	button.addEventListener("click", () => {
 		removeSearchToken(index);
 	});
@@ -454,6 +455,18 @@ export function initListSearch({ onChange, typeValues = [] }) {
 			if (!state.searchQuery.trim()) return;
 			const committed = commitSearchDraft();
 			if (committed) event.preventDefault();
+			return;
+		}
+
+		// Escape clears typed text first, then leaves the field.
+		if (event.key === "Escape") {
+			event.preventDefault();
+			if (state.searchQuery) {
+				dom.searchInput.value = "";
+				state.searchQuery = "";
+				renderSearchSuggestions(typeValues);
+				runSearchChange(true);
+			} else dom.searchInput.blur();
 			return;
 		}
 

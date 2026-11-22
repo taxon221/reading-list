@@ -6,6 +6,7 @@ import { createListRenderer } from "./list-render.js";
 import { createSavedViews } from "./list-saved-views.js";
 import { initListSearch, syncListSearchUi } from "./list-search.js";
 import { dom, handleAuthFailure, state } from "./shared.js";
+import { showToast } from "./toast.js";
 import { shouldIgnoreKeyboardShortcut } from "./utils.js";
 import {
 	captureProgressSnapshot,
@@ -15,6 +16,7 @@ import {
 function showView(view) {
 	dom.viewTabs.forEach((tab) => {
 		tab.classList.toggle("active", tab.dataset.view === view);
+		tab.setAttribute("aria-pressed", String(tab.dataset.view === view));
 	});
 
 	if (dom.readingListView) {
@@ -24,6 +26,14 @@ function showView(view) {
 		dom.notesView.style.display = view === "notes" ? "" : "none";
 	}
 }
+
+const KEYBOARD_SHORTCUTS = [
+	"Keyboard shortcuts",
+	"A  Add a link · S  Search",
+	"J / K  Next / previous item · Enter  Open",
+	"In the reader: O  Open original · H  Notes · T  Edit tags",
+	"← / →  Turn EPUB pages · Esc  Close",
+].join("\n");
 
 const READ_STATUS_KEY = "reading-list-read-status";
 const READ_STATUSES = ["all", "unread", "in-progress"];
@@ -264,16 +274,40 @@ export function initList(app) {
 		return false;
 	}
 
+	// j/k step through items; Enter opens the focused one.
+	function moveItemFocus(step) {
+		const titles = [...(dom.itemsList?.querySelectorAll(".item-title") || [])];
+		if (titles.length === 0) return;
+		const current = titles.indexOf(
+			document.activeElement?.closest(".item")?.querySelector(".item-title"),
+		);
+		const next =
+			current === -1
+				? step > 0
+					? 0
+					: titles.length - 1
+				: Math.min(titles.length - 1, Math.max(0, current + step));
+		titles[next].focus();
+		titles[next].scrollIntoView({ block: "nearest" });
+	}
+
 	document.addEventListener("keydown", (event) => {
 		const key = event.key.toLowerCase();
-		if (key !== "s" && key !== "a") return;
+		if (!["s", "a", "j", "k", "?"].includes(key)) return;
 		if (shouldIgnoreKeyboardShortcut(event)) return;
 		if (listShortcutsBlocked()) return;
 		if (state.isUnauthorized) return;
+		if ((key === "j" || key === "k") && dom.readingListView?.style.display)
+			return;
 
 		event.preventDefault();
+		if (key === "?") {
+			showToast(KEYBOARD_SHORTCUTS, { duration: 10000 });
+			return;
+		}
 		showView("reading-list");
-		if (key === "s") {
+		if (key === "j" || key === "k") moveItemFocus(key === "j" ? 1 : -1);
+		else if (key === "s") {
 			dom.searchInput?.focus();
 		} else {
 			app.openAddModal?.("link");

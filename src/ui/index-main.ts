@@ -25,8 +25,8 @@ export function renderIndexMain() {
       </header>
 
       <nav class="view-tabs">
-        <button type="button" class="view-tab active" data-view="reading-list">Reading List</button>
-        <button type="button" class="view-tab" data-view="notes">Notes & Highlights</button>
+        <button type="button" class="view-tab active" data-view="reading-list" aria-pressed="true">Reading List</button>
+        <button type="button" class="view-tab" data-view="notes" aria-pressed="false">Notes & Highlights</button>
       </nav>
 
       <div id="reading-list-view">

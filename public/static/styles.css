@@ -236,7 +236,8 @@ body.modal-open {
     contain-intrinsic-size: auto 84px;
 }
 
-.item:hover {
+.item:hover,
+.item:focus-within {
     box-shadow: var(--shadow-lg);
 }
 
@@ -527,8 +528,17 @@ body.modal-open {
     height: 18px;
 }
 
-.item:hover .btn-more {
+.item:hover .btn-more,
+.item:focus-within .btn-more {
     opacity: 1;
+}
+
+/* Touch screens have no hover, so keep the menu button visible and tappable. */
+@media (hover: none) {
+    .btn-more {
+        opacity: 1;
+        height: 28px;
+    }
 }
 
 .btn-more:hover {
@@ -1533,14 +1543,21 @@ body.modal-open {
     border-left: 1px solid var(--border);
     transition:
         width 0.2s,
-        opacity 0.2s;
+        opacity 0.2s,
+        visibility 0s;
 }
 
+/* Collapsed notes stay out of the tab order and screen reader output. */
 .reader-sidebar.hidden {
     width: 0;
     opacity: 0;
     overflow: hidden;
     border-left: none;
+    visibility: hidden;
+    transition:
+        width 0.2s,
+        opacity 0.2s,
+        visibility 0s 0.2s;
 }
 
 .sidebar-header {
@@ -1628,8 +1645,8 @@ body.modal-open {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: var(--shadow);
+    /* Transparent rather than hidden, so Tab can reach and reveal the buttons. */
     opacity: 0;
-    visibility: hidden;
     pointer-events: none;
     transition: opacity 0.15s;
 }
@@ -1637,7 +1654,6 @@ body.modal-open {
 .sidebar-highlight:hover .sidebar-highlight-actions,
 .sidebar-highlight:focus-within .sidebar-highlight-actions {
     opacity: 1;
-    visibility: visible;
     pointer-events: auto;
 }
 

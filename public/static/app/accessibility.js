@@ -31,6 +31,14 @@ export function initAccessibility() {
 			attributes: true,
 			attributeFilter: ["style", "hidden"],
 		});
+	// Dialogs with their own Escape handling mark the event handled first.
+	document.addEventListener("keydown", (event) => {
+		if (event.key !== "Escape" || event.defaultPrevented || !active) return;
+		const close = active.querySelector(".modal-close");
+		if (!close) return;
+		event.preventDefault();
+		close.click();
+	});
 	document.addEventListener("keydown", (event) => {
 		if (event.key !== "Tab" || !active) return;
 		const controls = [

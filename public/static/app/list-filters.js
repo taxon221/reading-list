@@ -205,6 +205,7 @@ export function createListFilters({ refreshList }) {
 		button.type = "button";
 		button.className = "filter-chip-remove";
 		button.textContent = "×";
+		button.setAttribute("aria-label", `Remove filter ${text}`);
 		button.addEventListener("click", onRemove);
 
 		chip.append(label, button);
@@ -311,6 +312,21 @@ export function createListFilters({ refreshList }) {
 	}
 
 	function initDropdowns() {
+		// Tell assistive tech whether each filter menu is open.
+		for (const dropdown of document.querySelectorAll(".filter-dropdown")) {
+			const button = dropdown.querySelector(".filter-btn");
+			if (!button) continue;
+			const sync = () =>
+				button.setAttribute(
+					"aria-expanded",
+					String(dropdown.classList.contains("open")),
+				);
+			sync();
+			new MutationObserver(sync).observe(dropdown, {
+				attributes: true,
+				attributeFilter: ["class"],
+			});
+		}
 		dom.typeOptions
 			?.querySelectorAll('input[type="checkbox"]')
 			.forEach((checkbox) => {
@@ -353,6 +369,13 @@ export function createListFilters({ refreshList }) {
 			if (!event.target.closest(".filter-dropdown")) {
 				closeAllDropdowns();
 			}
+		});
+		document.addEventListener("keydown", (event) => {
+			if (event.key !== "Escape") return;
+			const open = document.querySelector(".filter-dropdown.open");
+			if (!open) return;
+			closeAllDropdowns();
+			open.querySelector(".filter-btn")?.focus();
 		});
 
 		dom.typeSearch?.addEventListener("input", (event) => {

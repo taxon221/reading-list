@@ -210,6 +210,8 @@ export function setupTagInput(input, tagArray, container, options = {}) {
 		}
 
 		if (event.key === "Escape") {
+			if (suggestionsEl.style.display === "none") return;
+			event.preventDefault();
 			closeSuggestions();
 			return;
 		}
@@ -254,6 +256,7 @@ export function renderTagPills(tagArray, container, input) {
 		const button = document.createElement("button");
 		button.type = "button";
 		button.textContent = "×";
+		button.setAttribute("aria-label", `Remove tag ${tag}`);
 		button.addEventListener("click", () => {
 			const index = tagArray.indexOf(tag);
 			if (index !== -1) tagArray.splice(index, 1);

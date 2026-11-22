@@ -7,15 +7,6 @@ export function renderIndexOverlays() {
       </button>
     </div>
 
-    <div role="dialog" aria-modal="true" aria-labelledby="note-modal-title" class="note-modal-overlay" id="note-modal" style="display: none">
-      <div class="note-modal">
-        <div class="note-modal-header"><h3 id="note-modal-title">Add Note</h3><button type="button" class="modal-close" id="note-modal-close">×</button></div>
-        <div class="note-modal-quote" id="note-modal-quote"></div>
-        <textarea id="note-modal-text" placeholder="Add a note" rows="3"></textarea>
-        <div class="note-modal-actions"><button type="button" class="btn-secondary" id="note-modal-cancel">Cancel</button><button type="button" class="btn-primary" id="note-modal-save">Save Highlight</button></div>
-      </div>
-    </div>
-
     <div role="dialog" aria-modal="true" aria-labelledby="reader-title" class="reader-overlay" id="reader-modal" style="display: none">
       <div class="reader-container">
         <div class="reader-header">
@@ -29,9 +20,9 @@ export function renderIndexOverlays() {
                 <button type="button" class="reader-btn reader-font-btn" id="reader-font-increase" title="Increase text size" aria-label="Increase text size">A+</button>
               </div>
               <button type="button" class="reader-btn theme-toggle" id="reader-theme-toggle" aria-label="Theme" title="Theme: Device"><span class="theme-symbol theme-symbol-system" aria-hidden="true">◐</span><span class="theme-symbol theme-symbol-dark" aria-hidden="true">☾</span><span class="theme-symbol theme-symbol-light" aria-hidden="true">☼</span></button>
-              <button type="button" class="reader-btn" id="reader-toggle-notes" title="Toggle notes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></button>
-              <a href="#" id="reader-open-original" class="reader-btn" target="_blank" rel="noopener" title="Open original"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>
-              <button type="button" class="reader-btn reader-close" id="reader-close" title="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+              <button type="button" class="reader-btn" id="reader-toggle-notes" title="Notes and highlights (H)" aria-label="Notes and highlights" aria-expanded="false" aria-controls="reader-sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></button>
+              <a href="#" id="reader-open-original" class="reader-btn" target="_blank" rel="noopener" title="Open original (O)" aria-label="Open original"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>
+              <button type="button" class="reader-btn reader-close" id="reader-close" title="Close (Esc)" aria-label="Close reader"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
             </div>
           </div>
         </div>
@@ -50,9 +41,19 @@ export function renderIndexOverlays() {
       <button type="button" class="dropdown-item" id="dropdown-open-url"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>Open original URL</button>
     </div>
 
+    <!-- After the reader: the last open dialog in page order takes focus. -->
+    <div role="dialog" aria-modal="true" aria-labelledby="note-modal-title" class="note-modal-overlay" id="note-modal" style="display: none">
+      <div class="note-modal">
+        <div class="note-modal-header"><h3 id="note-modal-title">Add Note</h3><button type="button" class="modal-close" id="note-modal-close" aria-label="Close">×</button></div>
+        <div class="note-modal-quote" id="note-modal-quote"></div>
+        <textarea id="note-modal-text" placeholder="Add a note" rows="3"></textarea>
+        <div class="note-modal-actions"><button type="button" class="btn-secondary" id="note-modal-cancel">Cancel</button><button type="button" class="btn-primary" id="note-modal-save">Save Highlight</button></div>
+      </div>
+    </div>
+
     <div role="dialog" aria-modal="true" aria-labelledby="add-modal-title" class="modal-overlay" id="add-modal" style="display: none">
       <div class="modal">
-        <div class="modal-header"><h2 id="add-modal-title">Add link</h2><button type="button" class="modal-close" id="add-modal-close">×</button></div>
+        <div class="modal-header"><h2 id="add-modal-title">Add link</h2><button type="button" class="modal-close" id="add-modal-close" aria-label="Close">×</button></div>
         <form id="add-item-form">
           <input type="file" id="file-upload-input" accept=".pdf,.epub,application/pdf,application/epub+zip" hidden />
           <div class="form-group" id="add-url-group"><label for="url" id="add-url-label">URL</label><input type="url" id="url" placeholder="https://example.com/article" autocomplete="off" /></div>
@@ -71,7 +72,7 @@ export function renderIndexOverlays() {
 
     <div role="dialog" aria-modal="true" aria-label="Save view" class="modal-overlay" id="save-view-modal" style="display: none">
       <div class="modal">
-        <div class="modal-header"><h2>Save View</h2><button type="button" class="modal-close" id="save-view-modal-close">×</button></div>
+        <div class="modal-header"><h2>Save View</h2><button type="button" class="modal-close" id="save-view-modal-close" aria-label="Close">×</button></div>
         <form id="save-view-form">
           <div class="form-group"><label for="save-view-name">Name</label><input type="text" id="save-view-name" maxlength="40" placeholder="For example: Hide X" autocomplete="off" required /></div>
           <div class="modal-actions"><button type="button" class="btn-secondary" id="save-view-cancel">Cancel</button><button type="submit" class="btn-primary">Save</button></div>
@@ -81,7 +82,7 @@ export function renderIndexOverlays() {
 
     <div role="dialog" aria-modal="true" aria-label="Edit item" class="modal-overlay" id="edit-modal" style="display: none">
       <div class="modal">
-        <div class="modal-header"><h2>Edit Item</h2><button type="button" class="modal-close" id="modal-close">×</button></div>
+        <div class="modal-header"><h2>Edit Item</h2><button type="button" class="modal-close" id="modal-close" aria-label="Close">×</button></div>
         <form id="edit-form">
           <input type="hidden" id="edit-id" />
           <div class="form-group"><label for="edit-url">URL</label><input type="url" id="edit-url" required /></div>
