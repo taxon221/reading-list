@@ -59,4 +59,13 @@ loadAuthUi().then(async () => {
 	app.loadTags?.();
 	await app.handleShareTarget?.();
 	if (state.authUi.currentUser) await restoreDraft(app);
+	// The installed app's "Add link" shortcut opens /#add.
+	if (location.hash === "#add") {
+		history.replaceState(
+			history.state,
+			"",
+			location.pathname + location.search,
+		);
+		app.openAddModal?.("link");
+	}
 });

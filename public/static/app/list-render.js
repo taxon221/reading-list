@@ -3,6 +3,7 @@ import {
 	createEmptyState,
 	createSvgIcon,
 	formatDate,
+	formatFullDate,
 	getDomain,
 	renderItemProgressMeta,
 } from "./utils.js";
@@ -181,6 +182,7 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 		const date = document.createElement("span");
 		date.className = "item-date";
 		date.textContent = formatDate(item.created_at);
+		date.title = `Saved ${formatFullDate(item.created_at)}`;
 
 		left.append(type, date);
 

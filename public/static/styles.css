@@ -1878,6 +1878,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .reading-status [data-status] { border:1px solid var(--border); border-radius: var(--radius-sm); background:var(--bg-card); color:var(--text-muted); padding:.5rem .9rem; cursor:pointer; font:inherit; font-size:.875rem; }
 .reading-status [aria-pressed="true"] { background:var(--text); color:var(--bg-card); border-color:var(--text); }
 #library-status { color:var(--text-muted); font-size:.875rem; }
+.library-count { color:var(--text-muted); font-size:.8125rem; margin:0 0 .5rem; }
 /* Authentication uses the same card, header, fields, and buttons as other dialogs. */
 #signin-modal,
 #recovery-panel {

@@ -39,7 +39,7 @@ export function renderIndexMain() {
           </div>
         </section>
 
-        <nav class="reading-status" aria-label="Reading status"><button type="button" data-status="unread" aria-pressed="false">Unread</button><button type="button" data-status="in-progress" aria-pressed="false">In progress</button><button type="button" data-status="all" aria-pressed="true">All</button></nav><p id="library-status" role="status" aria-live="polite"></p>
+        <nav class="reading-status" aria-label="Reading status"><button type="button" data-status="unread" aria-pressed="false">Unread</button><button type="button" data-status="in-progress" aria-pressed="false">In progress</button><button type="button" data-status="all" aria-pressed="true">All</button></nav><p id="library-status" role="status" aria-live="polite"></p><p id="library-count" class="library-count" hidden></p>
         <section class="filters">
           <div class="filters-row">
             <div class="filter-dropdown" id="type-dropdown">

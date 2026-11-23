@@ -638,12 +638,38 @@ export function renderItemProgressMeta(item) {
 	return stack;
 }
 
-export function formatDate(dateStr) {
-	const date = new Date(dateStr);
-	const now = new Date();
-	const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+// SQLite CURRENT_TIMESTAMP values are UTC without a zone ("2026-01-02 03:04:05").
+// Parsing them as-is treats them as local time, and older Safari rejects them.
+export function parseServerDate(value) {
+	if (typeof value === "string") {
+		const match = value.match(
+			/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/,
+		);
+		if (match) return new Date(`${match[1]}T${match[2]}Z`);
+	}
+	return new Date(value);
+}
 
-	if (diffDays === 0) return "Today";
+export function formatFullDate(dateStr) {
+	const date = parseServerDate(dateStr);
+	if (Number.isNaN(date.getTime())) return "";
+	return date.toLocaleString(undefined, {
+		dateStyle: "medium",
+		timeStyle: "short",
+	});
+}
+
+export function formatDate(dateStr) {
+	const date = parseServerDate(dateStr);
+	if (Number.isNaN(date.getTime())) return "";
+	const now = new Date();
+	const startOfDay = (value) =>
+		new Date(value.getFullYear(), value.getMonth(), value.getDate());
+	const diffDays = Math.round(
+		(startOfDay(now) - startOfDay(date)) / (1000 * 60 * 60 * 24),
+	);
+
+	if (diffDays <= 0) return "Today";
 	if (diffDays === 1) return "Yesterday";
 	if (diffDays < 7) return `${diffDays}d ago`;
 
@@ -660,7 +686,7 @@ export function getDomain(url) {
 	}
 
 	if (URL.canParse(url)) {
-		return new URL(url).hostname.replace("www.", "");
+		return new URL(url).hostname.replace(/^www\./, "");
 	}
 
 	if (typeof url === "string" && url.startsWith("/")) return "Local file";

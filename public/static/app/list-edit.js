@@ -104,12 +104,16 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 	async function openEditModal(id, options = {}) {
 		if (state.isUnauthorized) return;
 
-		const response = await fetch(`/api/items/${id}`).catch(() => null);
-		if (!response) return;
-		if (handleAuthFailure(response)) return;
-		if (!response.ok || !dom.editModal) return;
-
-		const item = await response.json();
+		if (!dom.editModal) return;
+		// The loaded library already has every field, so open without a round trip.
+		let item = state.itemsById.get(Number(id));
+		if (!item) {
+			const response = await fetch(`/api/items/${id}`).catch(() => null);
+			if (!response) return;
+			if (handleAuthFailure(response)) return;
+			if (!response.ok) return;
+			item = await response.json();
+		}
 
 		if (dom.editIdInput) dom.editIdInput.value = item.id;
 		if (dom.editUrlInput) dom.editUrlInput.value = item.url;
@@ -124,20 +128,25 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 		}
 		renderTagPills(state.editTags, dom.editTagsContainer, dom.editTagInput);
 		dom.editModal.style.display = "flex";
-		if (options.focusTagInput) {
-			window.requestAnimationFrame(() => {
-				dom.editTagInput?.focus();
-			});
-		}
+		window.requestAnimationFrame(() => {
+			(options.focusTagInput ? dom.editTagInput : dom.editTitleInput)?.focus();
+		});
 	}
 
 	function closeEditModal() {
 		if (!dom.editModal || !dom.editForm) return;
 
+		const id = Number(dom.editIdInput?.value);
 		dom.editModal.style.display = "none";
 		dom.editForm.reset();
 		state.editTags.length = 0;
 		renderTagPills(state.editTags, dom.editTagsContainer, dom.editTagInput);
+		// The menu entry that opened the dialog is gone; return to the item's menu button.
+		window.requestAnimationFrame(() => {
+			if (document.activeElement && document.activeElement !== document.body)
+				return;
+			dom.itemsList?.querySelector(`.item[data-id="${id}"] .btn-more`)?.focus();
+		});
 	}
 
 	function initItemMenu() {
@@ -231,48 +240,61 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 				return;
 			}
 
-			const payload = {
-				url: dom.editUrlInput?.value.trim() || "",
-				title: dom.editTitleInput?.value.trim() || "",
-				author: dom.editAuthorInput?.value.trim() || "",
-				type: dom.editTypeSelect?.value || "article",
-				preview_image: "",
-				reading_time_minutes: null,
-				tags: state.editTags,
-			};
-			const originalUrl = dom.editForm?.dataset.originalUrl || "";
-			if (payload.url === originalUrl) {
-				const currentItem = state.itemsById.get(Number(dom.editIdInput?.value));
-				payload.preview_image = currentItem?.preview_image || "";
-				payload.reading_time_minutes =
-					currentItem?.reading_time_minutes ?? null;
-			} else {
-				const meta = await fetchItemMetadata(payload.url);
-				payload.preview_image = String(meta?.image || "").trim();
-				payload.reading_time_minutes = Number.isInteger(
-					meta?.reading_time_minutes,
-				)
-					? Number(meta.reading_time_minutes)
-					: null;
+			const saveButton = dom.editForm.querySelector('[type="submit"]');
+			if (saveButton?.disabled) return;
+			if (saveButton) saveButton.disabled = true;
+			try {
+				await saveEdit();
+			} finally {
+				if (saveButton) saveButton.disabled = false;
 			}
-
-			const response = await fetch(`/api/items/${dom.editIdInput?.value}`, {
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload),
-			}).catch(() => null);
-			if (response && handleAuthFailure(response)) return;
-			if (!response?.ok) {
-				showToast("Couldn't save your changes. Please try again.", {
-					type: "error",
-				});
-				return;
-			}
-
-			closeEditModal();
-			loadItems();
-			loadTags();
 		});
+	}
+
+	async function saveEdit() {
+		const payload = {
+			url: dom.editUrlInput?.value.trim() || "",
+			title: dom.editTitleInput?.value.trim() || "",
+			author: dom.editAuthorInput?.value.trim() || "",
+			type: dom.editTypeSelect?.value || "article",
+			preview_image: "",
+			reading_time_minutes: null,
+			tags: state.editTags,
+		};
+		const originalUrl = dom.editForm?.dataset.originalUrl || "";
+		if (payload.url === originalUrl) {
+			const currentItem = state.itemsById.get(Number(dom.editIdInput?.value));
+			payload.preview_image = currentItem?.preview_image || "";
+			payload.reading_time_minutes = currentItem?.reading_time_minutes ?? null;
+		} else {
+			const meta = await fetchItemMetadata(payload.url);
+			payload.preview_image = String(meta?.image || "").trim();
+			payload.reading_time_minutes = Number.isInteger(
+				meta?.reading_time_minutes,
+			)
+				? Number(meta.reading_time_minutes)
+				: null;
+		}
+
+		const response = await fetch(`/api/items/${dom.editIdInput?.value}`, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(payload),
+		}).catch(() => null);
+		if (response && handleAuthFailure(response)) return;
+		if (!response?.ok) {
+			showToast("Couldn't save your changes. Please try again.", {
+				type: "error",
+			});
+			return;
+		}
+
+		const id = Number(dom.editIdInput?.value);
+		if (Number(state.currentReaderId) === id && dom.readerTitle)
+			dom.readerTitle.textContent = payload.title || payload.url;
+		closeEditModal();
+		loadItems();
+		loadTags();
 	}
 
 	return {

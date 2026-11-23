@@ -2,6 +2,7 @@ import { dom, state } from "./shared.js";
 import {
 	createEmptyState,
 	formatDate,
+	formatFullDate,
 	getIframeDocument,
 	isMobileViewport,
 	shouldIgnoreKeyboardShortcut,
@@ -122,7 +123,7 @@ function createHighlightCard(highlight) {
         <div class="highlight-card-source">
           <a href="#" data-action="open-highlight-reader" data-item-id="${highlight.item_id}" data-item-url="${itemUrl}" data-item-title="${itemTitle}" data-item-type="${itemType}">${itemTitle || "Untitled"}</a>
         </div>
-        <span class="highlight-card-date">${escapeHtml(formatDate(highlight.created_at))}</span>
+        <span class="highlight-card-date" title="${escapeHtml(formatFullDate(highlight.created_at))}">${escapeHtml(formatDate(highlight.created_at))}</span>
       </div>
       <div class="highlight-card-quote" data-action="open-at-highlight" data-id="${highlight.id}" data-item-id="${highlight.item_id}" data-item-url="${itemUrl}" data-item-title="${itemTitle}" data-item-type="${itemType}">${escapeHtml(highlight.selected_text)}</div>
       ${highlight.note ? `<div class="highlight-card-note">${escapeHtml(highlight.note)}</div>` : ""}

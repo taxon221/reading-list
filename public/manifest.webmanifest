@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "Reading List",
   "short_name": "Reading List",
   "description": "Save articles, PDFs, and ebooks to read later",
@@ -17,6 +18,13 @@
       "src": "/static/icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Add link",
+      "url": "/#add",
+      "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }]
     }
   ],
   "share_target": {

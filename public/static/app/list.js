@@ -105,6 +105,7 @@ export function initList(app) {
 		else if (existing) {
 			existing.remove();
 			if (!dom.itemsList.querySelector(".item")) renderCurrentItems();
+			else showItemCount(dom.itemsList.querySelectorAll(".item").length);
 		} else if (visible) renderCurrentItems();
 	};
 	app.loadSavedViews = savedViews.loadSavedViews;
@@ -115,10 +116,20 @@ export function initList(app) {
 	app.closeItemMenu = editing.closeItemMenu;
 
 	function renderCurrentItems() {
-		renderer.renderItems(
-			filters.applyClientFilters(Array.from(state.itemsById.values())),
-			{ empty: state.itemsById.size === 0 },
+		const visible = filters.applyClientFilters(
+			Array.from(state.itemsById.values()),
 		);
+		renderer.renderItems(visible, { empty: state.itemsById.size === 0 });
+		showItemCount(visible.length);
+	}
+
+	// Only shown while filters hide part of the library.
+	function showItemCount(shown) {
+		const count = document.getElementById("library-count");
+		if (!count) return;
+		const total = state.itemsById.size;
+		count.hidden = shown === total || shown === 0;
+		count.textContent = `Showing ${shown} of ${total} items`;
 	}
 
 	function syncFilterUi() {
@@ -185,9 +196,7 @@ export function initList(app) {
 		status.textContent = "";
 		state.itemsById = new Map(items.map((item) => [Number(item.id), item]));
 		syncFilterUi();
-		renderer.renderItems(filters.applyClientFilters(items), {
-			empty: items.length === 0,
-		});
+		renderCurrentItems();
 		window.dispatchEvent(new Event("reading:library-loaded"));
 	}
 
