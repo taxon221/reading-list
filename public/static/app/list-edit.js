@@ -290,8 +290,11 @@ export function createListEditing({ app, loadItems, loadTags, filterByTag }) {
 		}
 
 		const id = Number(dom.editIdInput?.value);
-		if (Number(state.currentReaderId) === id && dom.readerTitle)
-			dom.readerTitle.textContent = payload.title || payload.url;
+		if (Number(state.currentReaderId) === id) {
+			const nextTitle = payload.title || payload.url;
+			if (dom.readerTitle) dom.readerTitle.textContent = nextTitle;
+			document.title = nextTitle ? `${nextTitle} · Reading List` : "Reading List";
+		}
 		closeEditModal();
 		loadItems();
 		loadTags();

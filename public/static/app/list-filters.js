@@ -371,9 +371,15 @@ export function createListFilters({ refreshList }) {
 			}
 		});
 		document.addEventListener("keydown", (event) => {
-			if (event.key !== "Escape") return;
+			if (
+				event.key !== "Escape" ||
+				event.defaultPrevented ||
+				document.querySelector(".container")?.inert
+			)
+				return;
 			const open = document.querySelector(".filter-dropdown.open");
 			if (!open) return;
+			event.preventDefault();
 			closeAllDropdowns();
 			open.querySelector(".filter-btn")?.focus();
 		});

@@ -182,7 +182,8 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 		const date = document.createElement("span");
 		date.className = "item-date";
 		date.textContent = formatDate(item.created_at);
-		date.title = `Saved ${formatFullDate(item.created_at)}`;
+		const fullDate = formatFullDate(item.created_at);
+		if (fullDate) date.title = `Saved ${fullDate}`;
 
 		left.append(type, date);
 

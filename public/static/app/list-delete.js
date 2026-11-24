@@ -5,12 +5,10 @@ const deleteFacetsData = { tags: [], authors: [], domains: [] };
 
 /** Mirrors the server's delete-by matching so the confirmation can show a count. */
 function countMatchingItems(by, values) {
-	const needles = values.map((value) =>
-		value
-			.trim()
-			.toLowerCase()
-			.replace(/^www\./, ""),
-	);
+	const needles = values.map((value) => {
+		const normalized = value.trim().toLowerCase();
+		return by === "domain" ? normalized.replace(/^www\./, "") : normalized;
+	});
 	let count = 0;
 	for (const item of state.itemsById.values()) {
 		let matches = false;
@@ -192,13 +190,11 @@ async function confirmDeleteItems() {
 			? `"${formatDeleteChoice(values[0])}"`
 			: `${values.length} selected values`;
 	const count = countMatchingItems(by, values);
-	if (count === 0) {
-		showToast("No matching items.");
-		return;
-	}
+	const subject =
+		count > 0 ? `${count} item${count === 1 ? "" : "s"}` : "all items";
 	if (
 		!confirm(
-			`Delete ${count} item${count === 1 ? "" : "s"} where ${by} matches ${preview}? This cannot be undone.`,
+			`Delete ${subject} where ${by} matches ${preview}? This cannot be undone.`,
 		)
 	)
 		return;

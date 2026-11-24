@@ -473,7 +473,8 @@ function initMetadataLookup() {
 			}
 			state.isFetching = false;
 			if (dom.submitBtn) {
-				dom.submitBtn.textContent = "Add";
+				dom.submitBtn.textContent =
+					state.addMode === "rss" ? "Add RSS feed" : "Add";
 				dom.submitBtn.removeAttribute("aria-busy");
 			}
 		}, 300);
@@ -839,7 +840,14 @@ function initAddMenu() {
 		closeAddMenu();
 	});
 	document.addEventListener("keydown", (event) => {
-		if (event.key !== "Escape" || dom.addMenu?.hidden !== false) return;
+		if (
+			event.key !== "Escape" ||
+			event.defaultPrevented ||
+			document.querySelector(".container")?.inert ||
+			dom.addMenu?.hidden !== false
+		)
+			return;
+		event.preventDefault();
 		closeAddMenu();
 		dom.addMenuButton?.focus();
 	});
