@@ -14,6 +14,7 @@ const pages = new Map();
 let pdf,
 	observer,
 	releaseObserver,
+	destroyed = false,
 	progressTicking = false;
 let renderQueue = Promise.resolve();
 GlobalWorkerOptions.workerSrc = "/static/vendor/pdf.worker.mjs";
@@ -42,44 +43,73 @@ function safeFileUrl(value) {
 		return null;
 	}
 }
+function releasePage(entry) {
+	entry.gen += 1;
+	entry.rendered = false;
+	entry.task?.cancel();
+	entry.task = null;
+	entry.textLayer?.cancel();
+	entry.textLayer = null;
+	for (const canvas of entry.element.querySelectorAll("canvas"))
+		canvas.width = canvas.height = 0;
+	entry.element.replaceChildren();
+}
 async function renderPage(number) {
 	const entry = pages.get(number);
 	// Skip pages scrolled past while queued, so the visible page renders next.
-	if (!entry || entry.rendered || !entry.near) return;
+	if (!entry || entry.rendered || !entry.near || destroyed) return;
+	const gen = ++entry.gen;
+	const isCancelled = () => destroyed || gen !== entry.gen || !entry.near;
 	entry.rendered = true;
+	let canvas = null;
 	try {
 		const page = await pdf.getPage(number);
+		if (isCancelled()) return;
 		const viewport = page.getViewport({ scale: entry.scale });
 		const previousHeight = entry.element.getBoundingClientRect().height;
 		const above = entry.element.getBoundingClientRect().bottom < 0;
 		entry.element.style.width = `${viewport.width}px`;
 		entry.element.style.height = `${viewport.height}px`;
 		if (above) window.scrollBy(0, viewport.height - previousHeight);
-		const canvas = document.createElement("canvas");
+		canvas = document.createElement("canvas");
 		canvas.className = "pdf-canvas";
 		const ratio = Math.min(devicePixelRatio || 1, 2);
 		canvas.width = Math.floor(viewport.width * ratio);
 		canvas.height = Math.floor(viewport.height * ratio);
 		canvas.style.width = `${viewport.width}px`;
 		canvas.style.height = `${viewport.height}px`;
-		const textLayer = document.createElement("div");
-		textLayer.className = "textLayer";
+		const textLayerEl = document.createElement("div");
+		textLayerEl.className = "textLayer";
 		entry.element.style.setProperty("--scale-factor", String(entry.scale));
 		entry.element.style.setProperty(
 			"--total-scale-factor",
 			String(entry.scale),
 		);
-		entry.element.replaceChildren(canvas, textLayer);
-		await page.render({
+		entry.element.replaceChildren(canvas, textLayerEl);
+		const renderTask = page.render({
 			canvasContext: canvas.getContext("2d"),
 			viewport,
 			transform: ratio === 1 ? null : [ratio, 0, 0, ratio, 0, 0],
-		}).promise;
-		await new TextLayer({
+		});
+		entry.task = renderTask;
+		await renderTask.promise;
+		entry.task = null;
+		if (isCancelled()) {
+			canvas.width = canvas.height = 0;
+			return;
+		}
+		const textLayer = new TextLayer({
 			textContentSource: page.streamTextContent(),
-			container: textLayer,
+			container: textLayerEl,
 			viewport,
-		}).render();
+		});
+		entry.textLayer = textLayer;
+		await textLayer.render();
+		entry.textLayer = null;
+		if (isCancelled()) {
+			canvas.width = canvas.height = 0;
+			return;
+		}
 		window.dispatchEvent(
 			new CustomEvent("readinglist:page-rendered", {
 				detail: { page: number },
@@ -90,7 +120,20 @@ async function renderPage(number) {
 			{ type: "readinglist:page-rendered", page: number },
 			location.origin,
 		);
-	} catch {
+	} catch (error) {
+		if (gen === entry.gen) {
+			entry.task = null;
+			entry.textLayer = null;
+		}
+		if (
+			isCancelled() ||
+			error?.name === "RenderingCancelledException" ||
+			error?.name === "AbortException"
+		) {
+			if (canvas) canvas.width = canvas.height = 0;
+			if (gen === entry.gen) entry.rendered = false;
+			return;
+		}
 		entry.rendered = false;
 		entry.element.textContent = "Couldn't render this page.";
 	}
@@ -146,7 +189,15 @@ async function start() {
 			element.setAttribute("aria-label", `Page ${number}`);
 			element.style.width = `${size.width * scale}px`;
 			element.style.height = `${size.height * scale}px`;
-			pages.set(number, { element, scale, rendered: false, near: false });
+			pages.set(number, {
+				element,
+				scale,
+				rendered: false,
+				near: false,
+				gen: 0,
+				task: null,
+				textLayer: null,
+			});
 			containerEl.append(element);
 		}
 		const root = document.scrollingElement || document.documentElement;
@@ -168,11 +219,12 @@ async function start() {
 			(entries) => {
 				for (const entry of entries) {
 					const page = pages.get(Number(entry.target.dataset.page));
-					if (entry.isIntersecting || !page.rendered) continue;
-					page.rendered = false;
-					for (const canvas of page.element.querySelectorAll("canvas"))
-						canvas.width = canvas.height = 0;
-					page.element.replaceChildren();
+					if (
+						entry.isIntersecting ||
+						(!page.rendered && !page.task && !page.textLayer)
+					)
+						continue;
+					releasePage(page);
 				}
 			},
 			{ rootMargin: "4000px 0px" },
@@ -186,8 +238,14 @@ async function start() {
 		window.addEventListener(
 			"pagehide",
 			() => {
+				destroyed = true;
 				observer.disconnect();
 				releaseObserver.disconnect();
+				for (const page of pages.values()) {
+					page.gen += 1;
+					page.task?.cancel();
+					page.textLayer?.cancel();
+				}
 				pdf.destroy();
 			},
 			{ once: true },

@@ -60,10 +60,26 @@ async function loadEpubEngine() {
 		await loadScript("/static/vendor/epub.min.js");
 }
 
+let epubOpenToken = 0;
+
+function destroyEpubBook(book) {
+	try {
+		book?.destroy?.();
+	} catch {}
+}
+
 export async function openEpubReader(itemUrl, readerApi) {
+	const openToken = ++epubOpenToken;
 	const readerId = state.currentReaderId;
+	let stage = null;
+	let book = null;
+	const isStale = () =>
+		openToken !== epubOpenToken ||
+		state.currentReaderId !== readerId ||
+		(stage !== null && !stage.isConnected);
+
 	await loadEpubEngine().catch(() => undefined);
-	if (state.currentReaderId !== readerId) return;
+	if (isStale()) return;
 	const epubFactory = window.ePub;
 	if (typeof epubFactory !== "function") {
 		showReaderError(itemUrl, "EPUB reader failed to load.");
@@ -87,7 +103,8 @@ export async function openEpubReader(itemUrl, readerApi) {
 	revokeReaderBlobUrl();
 	const shell = createEpubShell();
 	dom.readerContent.replaceChildren(shell.wrapper);
-	const { stage, prevBtn, nextBtn, prevZone, nextZone } = shell;
+	stage = shell.stage;
+	const { prevBtn, nextBtn, prevZone, nextZone } = shell;
 	shell.page.style.background = getArticleReaderTheme().background;
 
 	const attachSelectionToCurrentChapter = () => {
@@ -204,6 +221,7 @@ export async function openEpubReader(itemUrl, readerApi) {
 			15000,
 			"Timed out loading EPUB file.",
 		);
+		if (isStale()) return;
 		if (!fileResponse.ok) {
 			throw new Error("Failed to load EPUB file.");
 		}
@@ -213,13 +231,14 @@ export async function openEpubReader(itemUrl, readerApi) {
 			15000,
 			"Timed out reading EPUB file.",
 		);
+		if (isStale()) return;
 		const header = new Uint8Array(fileBuffer.slice(0, 4));
 		const isZip = header[0] === 0x50 && header[1] === 0x4b;
 		if (!isZip) {
 			throw new Error("The uploaded file is not a valid EPUB archive.");
 		}
 
-		const book = epubFactory(fileBuffer);
+		book = epubFactory(fileBuffer);
 		const rendition = book.renderTo(stage, {
 			width: "100%",
 			height: "100%",
@@ -264,6 +283,10 @@ export async function openEpubReader(itemUrl, readerApi) {
 		});
 
 		await withTimeout(book.ready, 12000, "EPUB parsing timed out.");
+		if (isStale()) {
+			destroyEpubBook(book);
+			return;
+		}
 
 		const savedProgress = readerApi.getCurrentItemReadingProgress(
 			state.currentReaderId,
@@ -292,6 +315,10 @@ export async function openEpubReader(itemUrl, readerApi) {
 		} else {
 			await withTimeout(rendition.display(), 12000, "EPUB render timed out.");
 		}
+		if (isStale()) {
+			destroyEpubBook(book);
+			return;
+		}
 
 		attachSelectionToCurrentChapter();
 		// Index locations after the book is visible instead of before; large
@@ -303,18 +330,29 @@ export async function openEpubReader(itemUrl, readerApi) {
 		)
 			.catch(() => null)
 			.then(() => {
-				if (state.currentEpubBook !== book) return;
+				if (
+					isStale() ||
+					state.currentEpubBook !== book ||
+					book.locations.length() === 0
+				)
+					return;
 				locationsReady = true;
 				reportLocation(rendition.currentLocation());
 			});
 
 		setTimeout(() => {
+			if (isStale() || state.currentEpubBook !== book) return;
 			if (!stage.querySelector("iframe")) {
 				showReaderError(itemUrl, "Failed to render EPUB content.");
 			}
 		}, 1500);
 	} catch (error) {
-		resetEpubReader();
+		if (isStale()) {
+			destroyEpubBook(book);
+			return;
+		}
+		if (state.currentEpubBook === book) resetEpubReader();
+		else destroyEpubBook(book);
 		showReaderError(
 			itemUrl,
 			error && typeof error.message === "string" && error.message
