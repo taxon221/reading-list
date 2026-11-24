@@ -188,7 +188,6 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 		left.append(type, date);
 
 		const progress = renderItemProgressMeta(item);
-		if (!useNewLayout && progress) left.appendChild(progress);
 
 		const right = document.createElement("div");
 		right.className = "item-col-right";
@@ -348,8 +347,8 @@ export function createListRenderer({ onToggleInclude, onToggleExclude }) {
 				buildThumbContent(item.type, item.url || "", item.preview_image || ""),
 			);
 			content.prepend(thumbCol);
-			if (progress) content.appendChild(progress);
 		}
+		if (progress) content.appendChild(progress);
 
 		article.append(content, actions);
 		return article;

@@ -218,7 +218,8 @@ export function buildParsedArticleDocument(data) {
       html{background:var(--rl-reader-bg)}
       body{margin:0 auto;padding:max(96px, calc(64px + env(safe-area-inset-top))) max(20px, env(safe-area-inset-right)) max(120px, calc(80px + env(safe-area-inset-bottom))) max(20px, env(safe-area-inset-left));max-width:44rem;background:var(--rl-reader-bg);color:var(--rl-reader-text);font-family:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;font-size:var(--rl-reader-font-size,20px);line-height:1.78;letter-spacing:.01em;-webkit-text-size-adjust:100%;text-size-adjust:100%}
       .rl-reader-header{margin:0 0 2.6rem;padding-bottom:1.4rem;border-bottom:1px solid var(--rl-reader-rule)}
-      .rl-reader-header h1{margin:0 0 .7rem;font-size:clamp(2rem,4vw,3.2rem);line-height:1.03;letter-spacing:-.02em}
+      .rl-reader-header h1{margin:0 0 .7rem;font-size:clamp(2rem,4vw,3.2rem);line-height:1.08;letter-spacing:-.02em}
+      @media (max-width:600px){body{padding:24px max(18px,env(safe-area-inset-right)) max(96px,calc(72px + env(safe-area-inset-bottom))) max(18px,env(safe-area-inset-left));line-height:1.7}.rl-reader-header{margin:0 0 1.6rem;padding-bottom:1rem}.rl-reader-header h1{font-size:clamp(1.5rem,6.5vw,2.25rem);line-height:1.15}}
       .rl-byline{margin:.35rem 0 0;color:var(--rl-reader-muted)}
       img,video,iframe{max-width:100%;height:auto;border-radius:18px}
       figure{margin-inline:0}
