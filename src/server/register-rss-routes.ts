@@ -70,16 +70,29 @@ export function registerRssRoutes(app: Hono<AppBindings>) {
 		}
 
 		// A double-click can race the existence check above.
-		db.query(
-			`INSERT OR IGNORE INTO rss_subscriptions (user_id, title, feed_url, site_url)
+		const inserted = db
+			.query(
+				`INSERT OR IGNORE INTO rss_subscriptions (user_id, title, feed_url, site_url)
 			 VALUES (?, '', ?, '')`,
-		).run(currentUser.id, feedUrl);
+			)
+			.run(currentUser.id, feedUrl);
 
 		const subscription = db
 			.query(
 				"SELECT * FROM rss_subscriptions WHERE user_id = ? AND feed_url = ?",
 			)
-			.get(currentUser.id, feedUrl) as RssSubscriptionRow;
+			.get(currentUser.id, feedUrl) as RssSubscriptionRow | undefined;
+		if (inserted.changes === 0) {
+			return c.json({
+				id: subscription?.id,
+				followed: true,
+				seen: 0,
+				subscriptions: listSubscriptions(currentUser.id),
+			});
+		}
+		if (!subscription) {
+			return c.json({ error: "RSS feed could not be saved" }, 500);
+		}
 		let initResult: Awaited<ReturnType<typeof initializeRssSubscription>>;
 		try {
 			initResult = await initializeRssSubscription(subscription);

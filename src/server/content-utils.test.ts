@@ -40,5 +40,8 @@ describe("article metadata parsing", () => {
 		expect(decodeHtmlEntities("A &ndash; B&hellip; &rsquo;s &unknown;")).toBe(
 			"A \u2013 B\u2026 \u2019s &unknown;",
 		);
+		expect(decodeHtmlEntities("Bad &#xD800; &#57343;")).toBe(
+			"Bad \ufffd \ufffd",
+		);
 	});
 });

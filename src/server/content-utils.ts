@@ -29,6 +29,7 @@ export function decodeHtmlEntities(text: string): string {
 				name[1] === "x" || name[1] === "X"
 					? parseInt(name.slice(2), 16)
 					: parseInt(name.slice(1), 10);
+			if (code >= 0xd800 && code <= 0xdfff) return "\ufffd";
 			return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
 		},
 	);
@@ -77,23 +78,28 @@ export function detectType(url: string, contentType?: string): string {
 	return "article";
 }
 
-type DocumentSource = () => Document;
+type DocumentSource = (() => Document) & { close: () => void };
 
 /** Parses the HTML into a DOM on first use, so several readers can share it. */
 function htmlDocumentSource(html: string, url?: string): DocumentSource {
-	let document: Document | undefined;
-	return () => {
-		document ??= new JSDOM(html, {
+	let dom: JSDOM | undefined;
+	const getDocument = (() => {
+		dom ??= new JSDOM(html, {
 			...(url ? { url } : {}),
 			virtualConsole: new VirtualConsole(),
-		}).window.document;
-		return document;
+		});
+		return dom.window.document;
+	}) as DocumentSource;
+	getDocument.close = () => {
+		dom?.window.close();
+		dom = undefined;
 	};
+	return getDocument;
 }
 
 export function parseTitle(
 	html: string,
-	getDocument: DocumentSource = htmlDocumentSource(html),
+	getDocument?: DocumentSource,
 ): string | null {
 	const ogMatch = html.match(
 		/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i,
@@ -115,13 +121,19 @@ export function parseTitle(
 	);
 	if (twitterMatchAlt) return decodeHtmlEntities(twitterMatchAlt[1].trim());
 
-	const articleHeading = getDocument()
-		.querySelector(
-			'h1.entry-title, h1.post-title, [itemprop="headline"], article h1, main h1',
-		)
-		?.textContent?.replace(/\s+/g, " ")
-		.trim();
-	if (articleHeading) return articleHeading;
+	const owned = !getDocument;
+	const source = getDocument ?? htmlDocumentSource(html);
+	try {
+		const articleHeading = source()
+			.querySelector(
+				'h1.entry-title, h1.post-title, [itemprop="headline"], article h1, main h1',
+			)
+			?.textContent?.replace(/\s+/g, " ")
+			.trim();
+		if (articleHeading) return articleHeading;
+	} finally {
+		if (owned) source.close();
+	}
 
 	const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
 	if (titleMatch) return decodeHtmlEntities(titleMatch[1].trim());
@@ -131,34 +143,46 @@ export function parseTitle(
 
 export function parseAuthor(
 	html: string,
-	getDocument: DocumentSource = htmlDocumentSource(html),
-	title: string | null = parseTitle(html, getDocument),
+	getDocument?: DocumentSource,
+	title?: string | null,
 ): string | null {
-	const patterns = [
-		/<meta[^>]*name=["']author["'][^>]*content=["']([^"']+)["']/i,
-		/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']author["']/i,
-		/<meta[^>]*property=["']article:author["'][^>]*content=["']([^"']+)["']/i,
-		/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']article:author["']/i,
-		/<meta[^>]*name=["']twitter:creator["'][^>]*content=["']([^"']+)["']/i,
-		/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:creator["']/i,
-	];
+	const owned = !getDocument;
+	const source = getDocument ?? htmlDocumentSource(html);
+	try {
+		const resolvedTitle =
+			title !== undefined ? title : parseTitle(html, source);
+		const patterns = [
+			/<meta[^>]*name=["']author["'][^>]*content=["']([^"']+)["']/i,
+			/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']author["']/i,
+			/<meta[^>]*property=["']article:author["'][^>]*content=["']([^"']+)["']/i,
+			/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']article:author["']/i,
+			/<meta[^>]*name=["']twitter:creator["'][^>]*content=["']([^"']+)["']/i,
+			/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:creator["']/i,
+		];
 
-	for (const pattern of patterns) {
-		const match = html.match(pattern);
-		if (match?.[1]) {
-			const author = decodeHtmlEntities(match[1].trim()).replace(/^@/, "");
-			if (title && author.toLowerCase() === title.toLowerCase()) continue;
-			if (author) return author;
+		for (const pattern of patterns) {
+			const match = html.match(pattern);
+			if (match?.[1]) {
+				const author = decodeHtmlEntities(match[1].trim()).replace(/^@/, "");
+				if (
+					resolvedTitle &&
+					author.toLowerCase() === resolvedTitle.toLowerCase()
+				)
+					continue;
+				if (author) return author;
+			}
 		}
+
+		const authorLink = source().querySelector(
+			'a[rel~="author"], a[href*="/author/"], a[href*="/authors/"]',
+		);
+		const author = authorLink?.textContent?.trim();
+		if (author) return author;
+
+		return null;
+	} finally {
+		if (owned) source.close();
 	}
-
-	const authorLink = getDocument().querySelector(
-		'a[rel~="author"], a[href*="/author/"], a[href*="/authors/"]',
-	);
-	const author = authorLink?.textContent?.trim();
-	if (author) return author;
-
-	return null;
 }
 
 function fallbackTitle(url: string): string {
@@ -227,39 +251,45 @@ function getPreviewImageCandidateValue(
 export function parsePreviewImage(
 	html: string,
 	sourceUrl: string,
-	getDocument: DocumentSource = htmlDocumentSource(html, sourceUrl),
+	getDocument?: DocumentSource,
 ): string | null {
-	const document = getDocument();
+	const owned = !getDocument;
+	const source = getDocument ?? htmlDocumentSource(html, sourceUrl);
+	try {
+		const document = source();
 
-	const prioritizedSelectors = [
-		'meta[property="og:image:secure_url"]',
-		'meta[property="og:image"]',
-		'meta[name="twitter:image"]',
-		'meta[name="twitter:image:src"]',
-		'link[rel="image_src"]',
-	];
+		const prioritizedSelectors = [
+			'meta[property="og:image:secure_url"]',
+			'meta[property="og:image"]',
+			'meta[name="twitter:image"]',
+			'meta[name="twitter:image:src"]',
+			'link[rel="image_src"]',
+		];
 
-	for (const selector of prioritizedSelectors) {
-		const normalized = normalizePreviewImageUrl(
-			sourceUrl,
-			getPreviewImageCandidateValue(document, selector),
+		for (const selector of prioritizedSelectors) {
+			const normalized = normalizePreviewImageUrl(
+				sourceUrl,
+				getPreviewImageCandidateValue(document, selector),
+			);
+			if (normalized) return normalized;
+		}
+
+		const imageNodes = document.querySelectorAll(
+			"article img[src], main img[src], img[src]",
 		);
-		if (normalized) return normalized;
-	}
+		const candidates = Array.from(imageNodes).slice(0, 8) as Element[];
+		for (const node of candidates) {
+			const rawSrc = node.getAttribute("src");
+			const normalized = normalizePreviewImageUrl(sourceUrl, rawSrc);
+			if (!normalized) continue;
+			if (/\b(icon|logo|avatar)\b/i.test(normalized)) continue;
+			return normalized;
+		}
 
-	const imageNodes = document.querySelectorAll(
-		"article img[src], main img[src], img[src]",
-	);
-	const candidates = Array.from(imageNodes).slice(0, 8) as Element[];
-	for (const node of candidates) {
-		const rawSrc = node.getAttribute("src");
-		const normalized = normalizePreviewImageUrl(sourceUrl, rawSrc);
-		if (!normalized) continue;
-		if (/\b(icon|logo|avatar)\b/i.test(normalized)) continue;
-		return normalized;
+		return null;
+	} finally {
+		if (owned) source.close();
 	}
-
-	return null;
 }
 
 export function normalizeStoredPreviewImage(value: unknown): string {
@@ -297,19 +327,26 @@ function buildRemoteMetadataFallback(url: string): RemoteMetadata {
 function estimateReadingTimeMinutes(
 	html: string,
 	sourceUrl: string,
+	getDocument?: DocumentSource,
 ): number | null {
-	const virtualConsole = new VirtualConsole();
-	const dom = new JSDOM(html, { url: sourceUrl, virtualConsole });
-	const { document } = dom.window;
-	const article = new Readability(document).parse();
-	const text = String(article?.textContent || document.body?.textContent || "")
-		.replace(/\s+/g, " ")
-		.trim();
-	if (!text) return null;
+	const owned = !getDocument;
+	const source = getDocument ?? htmlDocumentSource(html, sourceUrl);
+	try {
+		const document = source();
+		const article = new Readability(document).parse();
+		const text = String(
+			article?.textContent || document.body?.textContent || "",
+		)
+			.replace(/\s+/g, " ")
+			.trim();
+		if (!text) return null;
 
-	const wordCount = text.split(" ").filter(Boolean).length;
-	if (wordCount <= 0) return null;
-	return Math.max(1, Math.ceil(wordCount / 200));
+		const wordCount = text.split(" ").filter(Boolean).length;
+		if (wordCount <= 0) return null;
+		return Math.max(1, Math.ceil(wordCount / 200));
+	} finally {
+		if (owned) source.close();
+	}
 }
 
 export async function fetchRemoteMetadata(
@@ -341,11 +378,19 @@ export async function fetchRemoteMetadata(
 				) {
 					const html = await readResponseText(response);
 					const getDocument = htmlDocumentSource(html, finalUrl);
-					title = parseTitle(html, getDocument);
-					author = parseAuthor(html, getDocument, title);
-					image = parsePreviewImage(html, finalUrl, getDocument);
-					if (type === "article") {
-						readingTimeMinutes = estimateReadingTimeMinutes(html, finalUrl);
+					try {
+						title = parseTitle(html, getDocument);
+						author = parseAuthor(html, getDocument, title);
+						image = parsePreviewImage(html, finalUrl, getDocument);
+						if (type === "article") {
+							readingTimeMinutes = estimateReadingTimeMinutes(
+								html,
+								finalUrl,
+								getDocument,
+							);
+						}
+					} finally {
+						getDocument.close();
 					}
 				}
 
@@ -402,13 +447,18 @@ function buildArticleContentFallback(html: string, sourceUrl: string) {
 	} catch {}
 
 	const getOriginal = htmlDocumentSource(html);
-	const title = parseTitle(html, getOriginal);
-	return {
-		title: title || fallbackTitle(sourceUrl),
-		byline: parseAuthor(html, getOriginal, title) || "",
-		excerpt: "",
-		content: document.body?.innerHTML?.trim() || "",
-	};
+	try {
+		const title = parseTitle(html, getOriginal);
+		return {
+			title: title || fallbackTitle(sourceUrl),
+			byline: parseAuthor(html, getOriginal, title) || "",
+			excerpt: "",
+			content: document.body?.innerHTML?.trim() || "",
+		};
+	} finally {
+		getOriginal.close();
+		dom.window.close();
+	}
 }
 
 export function extractArticleContent(html: string, sourceUrl: string) {

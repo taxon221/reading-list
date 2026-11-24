@@ -247,6 +247,27 @@ describe("auth and user isolation", () => {
 		).toBe(400);
 	});
 
+	test("revalidates static files with weak ETag matching and Vary", async () => {
+		const initial = await api("/static/app.js");
+		expect(initial.status).toBe(200);
+		const etag = initial.headers.get("etag");
+		expect(etag).toMatch(/^W\/"/);
+		expect(initial.headers.get("vary")).toContain("Accept-Encoding");
+
+		const strongMatch = await api("/static/app.js", {
+			headers: { "If-None-Match": etag?.replace(/^W\//, "") ?? "" },
+		});
+		expect(strongMatch.status).toBe(304);
+		expect(strongMatch.headers.get("vary")).toContain("Accept-Encoding");
+		expect(strongMatch.headers.get("content-length")).toBeNull();
+		expect(strongMatch.headers.get("content-type")).toBeNull();
+
+		const wildcard = await api("/static/app.js", {
+			headers: { "If-None-Match": "*" },
+		});
+		expect(wildcard.status).toBe(304);
+	});
+
 	test("rejects missing identities while auto-provisioning users and the bootstrap admin", async () => {
 		const missingIdentity = await api("/api/items");
 		expect(missingIdentity.status).toBe(401);

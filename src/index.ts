@@ -78,9 +78,19 @@ const revalidateStatic: MiddlewareHandler = async (c, next) => {
 	if (c.res.status !== 200 || !etag) return;
 	c.header("Cache-Control", "no-cache");
 	c.header("CDN-Cache-Control", "no-store");
+	c.header("Vary", "Accept-Encoding", { append: true });
+	const weak = (tag: string) => tag.trim().replace(/^W\//, "");
 	const ifNoneMatch = c.req.header("If-None-Match");
-	if (ifNoneMatch?.split(",").some((tag) => tag.trim() === etag))
-		c.res = new Response(null, { status: 304, headers: c.res.headers });
+	if (
+		ifNoneMatch
+			?.split(",")
+			.some((tag) => tag.trim() === "*" || weak(tag) === weak(etag))
+	) {
+		const headers = new Headers(c.res.headers);
+		headers.delete("Content-Length");
+		headers.delete("Content-Type");
+		c.res = new Response(null, { status: 304, headers });
+	}
 };
 const staticOptions = {
 	onFound(path: string, c: Context) {
